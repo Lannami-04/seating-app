@@ -1,6 +1,11 @@
 import { useState } from 'react'
 
-function Chair( {color}: { color: string}) { //define component
+interface ChairProps { //give props' shape a name
+    color: string
+    seatNumber: number
+}
+
+function Chair({ color, seatNumber }: ChairProps) { //define component
     const [isTaken, setIsTaken] = useState(false)
 
     return ( //what is showed in screen
@@ -12,8 +17,12 @@ function Chair( {color}: { color: string}) { //define component
                 borderRadius: '50%',
                 backgroundColor: isTaken ? color : 'gray',
             }}
-        />
+        >
+            {seatNumber}
+        </button>
     )
+
+
 }
 
 export default Chair

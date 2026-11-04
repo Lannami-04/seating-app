@@ -14,10 +14,10 @@ function App() { //define
       <button onClick={() => setCount(0)}>
         Reset
       </button>
-      <Chair color ="pink" /> 
-      <Chair color ="pink" /> 
-      <Chair color ="yellow" /> 
-      <Chair color ="yellow" /> 
+      <Chair color ="pink" seatNumber={1} /> 
+      <Chair color ="pink" seatNumber={2}/> 
+      <Chair color ="yellow" seatNumber={3} /> 
+      <Chair color ="yellow" seatNumber={4} /> 
     </>
   )
 }
