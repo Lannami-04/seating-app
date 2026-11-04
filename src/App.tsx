@@ -1,8 +1,9 @@
 import { useState } from 'react' //bring tools
 import Chair from './Chair'
 
-function App() { //define component
+function App() { //define 
   const [count, setCount] = useState(0) //memory (state)
+
 
   return ( //what is showed in the screen
     <>
@@ -13,10 +14,10 @@ function App() { //define component
       <button onClick={() => setCount(0)}>
         Reset
       </button>
-      <Chair /> 
-      <Chair /> 
-      <Chair /> 
-      <Chair /> 
+      <Chair color ="pink" /> 
+      <Chair color ="pink" /> 
+      <Chair color ="yellow" /> 
+      <Chair color ="yellow" /> 
     </>
   )
 }
