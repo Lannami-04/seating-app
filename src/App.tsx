@@ -1,6 +1,15 @@
 import { useState } from 'react' //bring tools
 import Chair from './Chair'
 
+const chairs = [
+  { seatNumber: 1, color: 'pink' },
+  { seatNumber: 2, color: 'pink' },
+  { seatNumber: 3, color: 'yellow' },
+  { seatNumber: 4, color: 'yellow' },
+  { seatNumber: 5, color: 'yellow' },
+  { seatNumber: 6, color: 'pink' },
+]
+
 function App() { //define 
   const [count, setCount] = useState(0) //memory (state)
 
@@ -9,15 +18,15 @@ function App() { //define
     <>
       <button onClick={() => setCount((count) => count + 1)}>
         Count is {count}
-      </button> 
+      </button>
 
       <button onClick={() => setCount(0)}>
         Reset
       </button>
-      <Chair color ="pink" seatNumber={1} /> 
-      <Chair color ="pink" seatNumber={2}/> 
-      <Chair color ="yellow" seatNumber={3} /> 
-      <Chair color ="yellow" seatNumber={4} /> 
+      {chairs.map((chair) => (
+        <Chair key={chair.seatNumber} color={chair.color} seatNumber={chair.seatNumber} />
+      ))}
+
     </>
   )
 }
