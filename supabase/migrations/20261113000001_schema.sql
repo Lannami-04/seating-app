@@ -54,6 +54,8 @@ create table public.sections (
   id        text not null,
   name      text not null,
   color     text not null,
+  -- Order in the app's list (kept so every tablet draws things in the same order).
+  position  int  not null default 0,
   primary key (layout_id, id)
 );
 
@@ -67,6 +69,7 @@ create table public.features (
   width     real not null check (width > 0),
   height    real not null check (height > 0),
   rotation  real not null default 0,
+  position  int  not null default 0,
   primary key (layout_id, id)
 );
 
@@ -86,6 +89,7 @@ create table public.tables (
   -- Extra highchairs beside the table; they don't use up a seat.
   highchairs  int  not null default 0 check (highchairs between 0 and 10),
   section_id  text,
+  position    int  not null default 0,
   primary key (layout_id, id),
   -- Deleting a section leaves its tables without a section (only section_id is cleared).
   foreign key (layout_id, section_id) references public.sections (layout_id, id) on delete set null (section_id)

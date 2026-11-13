@@ -206,30 +206,31 @@ begin
   delete from public.sections s
   where s.layout_id = v_id
     and s.id not in (select j.v->>'id' from jsonb_array_elements(coalesce(p_layout->'sections', '[]'::jsonb)) as j(v));
-  insert into public.sections (layout_id, id, name, color)
-  select v_id, j.v->>'id', coalesce(j.v->>'name', ''), coalesce(j.v->>'color', '#888888')
-  from jsonb_array_elements(coalesce(p_layout->'sections', '[]'::jsonb)) as j(v)
-  on conflict (layout_id, id) do update set name = excluded.name, color = excluded.color;
+  insert into public.sections (layout_id, id, name, color, position)
+  select v_id, j.v->>'id', coalesce(j.v->>'name', ''), coalesce(j.v->>'color', '#888888'), j.n
+  from jsonb_array_elements(coalesce(p_layout->'sections', '[]'::jsonb)) with ordinality as j(v, n)
+  on conflict (layout_id, id) do update set name = excluded.name, color = excluded.color, position = excluded.position;
 
   -- Room items
   delete from public.features f
   where f.layout_id = v_id
     and f.id not in (select j.v->>'id' from jsonb_array_elements(coalesce(p_layout->'features', '[]'::jsonb)) as j(v));
-  insert into public.features (layout_id, id, kind, label, x, y, width, height, rotation)
+  insert into public.features (layout_id, id, kind, label, x, y, width, height, rotation, position)
   select v_id, j.v->>'id', j.v->>'kind', coalesce(j.v->>'label', ''),
          (j.v->>'x')::real, (j.v->>'y')::real, (j.v->>'width')::real, (j.v->>'height')::real,
-         coalesce((j.v->>'rotation')::real, 0)
-  from jsonb_array_elements(coalesce(p_layout->'features', '[]'::jsonb)) as j(v)
+         coalesce((j.v->>'rotation')::real, 0), j.n
+  from jsonb_array_elements(coalesce(p_layout->'features', '[]'::jsonb)) with ordinality as j(v, n)
   on conflict (layout_id, id) do update
     set kind = excluded.kind, label = excluded.label, x = excluded.x, y = excluded.y,
-        width = excluded.width, height = excluded.height, rotation = excluded.rotation;
+        width = excluded.width, height = excluded.height, rotation = excluded.rotation,
+        position = excluded.position;
 
   -- Tables (deleting one also removes its chairs and any guests on it)
   delete from public.tables t
   where t.layout_id = v_id
     and t.id not in (select j.v->>'id' from jsonb_array_elements(coalesce(p_layout->'tables', '[]'::jsonb)) as j(v));
   insert into public.tables (layout_id, id, name, shape, kind, guest_name, x, y, rotation,
-                             seats, chair_kinds, highchairs, section_id)
+                             seats, chair_kinds, highchairs, section_id, position)
   select v_id, j.v->>'id', coalesce(j.v->>'name', ''), j.v->>'shape', coalesce(j.v->>'kind', 'regular'),
          coalesce(j.v->>'guestName', ''), (j.v->>'x')::real, (j.v->>'y')::real,
          coalesce((j.v->>'rotation')::real, 0), (j.v->>'seats')::int,
@@ -237,12 +238,14 @@ begin
                                                      then j.v->'chairKinds' else '[]'::jsonb end)),
          coalesce((j.v->>'highchairs')::int, 0),
          -- Only keep the section if it exists in this layout.
-         (select s.id from public.sections s where s.layout_id = v_id and s.id = j.v->>'sectionId')
-  from jsonb_array_elements(coalesce(p_layout->'tables', '[]'::jsonb)) as j(v)
+         (select s.id from public.sections s where s.layout_id = v_id and s.id = j.v->>'sectionId'),
+         j.n
+  from jsonb_array_elements(coalesce(p_layout->'tables', '[]'::jsonb)) with ordinality as j(v, n)
   on conflict (layout_id, id) do update
     set name = excluded.name, shape = excluded.shape, kind = excluded.kind, guest_name = excluded.guest_name,
         x = excluded.x, y = excluded.y, rotation = excluded.rotation, seats = excluded.seats,
-        chair_kinds = excluded.chair_kinds, highchairs = excluded.highchairs, section_id = excluded.section_id;
+        chair_kinds = excluded.chair_kinds, highchairs = excluded.highchairs, section_id = excluded.section_id,
+        position = excluded.position;
 
   -- Chairs follow the tables: remove seats that no longer exist, add new ones, update the kind.
   delete from public.chairs c
