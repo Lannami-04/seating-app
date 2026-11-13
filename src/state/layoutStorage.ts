@@ -1,10 +1,13 @@
-// Saves the user's restaurant layouts in the browser so they survive a page refresh.
+// Helpers for restaurant layouts: upgrading old data, layout files (save / open), and reading
+// layouts that older versions of the app kept only in this browser. Layouts themselves are now
+// stored in the database (see remote.ts and useRestaurantLayouts.ts).
 
 import type { DesignSection, DesignTable, RestaurantLayout } from '../types'
 import { looksLikeAny, unusedSectionColor } from '../logic/designTables'
-import starter from '../data/starterLayouts.json'
 
+/** Where older versions of the app kept layouts in the browser (before the database). */
 const STORAGE_KEY = 'seating-restaurant-layouts-v1'
+const UPLOADED_KEY = 'seating-restaurant-layouts-v1-uploaded'
 
 /** Floor size in layout units (roughly feet): room for 100+ tables in a dozen or more sections. */
 const FLOOR_WIDTH = 200
@@ -65,18 +68,10 @@ function upgradeLayout(raw: Partial<RestaurantLayout>): RestaurantLayout {
   }
 }
 
-/** Layouts that ship with the app, shown the very first time it opens on a new device (e.g. the iPad). */
-function starterLayouts(): RestaurantLayout[] {
-  const list = (starter as { layouts?: unknown }).layouts
-  return Array.isArray(list) ? list.map((l: Partial<RestaurantLayout>) => upgradeLayout(l)) : []
-}
-
-export function loadLayouts(): RestaurantLayout[] {
+/** Layouts saved in this browser by the app before it used the database ([] if none or already copied). */
+export function loadLocalLayouts(): RestaurantLayout[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    // Never opened on this device before: start with the built-in layouts.
-    // (After that the key exists, so deleting every layout won't bring them back.)
-    if (raw === null) return starterLayouts()
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     return Array.isArray(parsed) ? parsed.map((l: Partial<RestaurantLayout>) => upgradeLayout(l)) : []
@@ -85,12 +80,25 @@ export function loadLayouts(): RestaurantLayout[] {
   }
 }
 
-export function saveLayouts(layouts: RestaurantLayout[]): void {
+/** After copying them to the database: keep a backup under another key, so the offer to copy goes away. */
+export function markLocalLayoutsUploaded(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(layouts))
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) localStorage.setItem(UPLOADED_KEY, raw)
+    localStorage.removeItem(STORAGE_KEY)
   } catch {
-    // Storage can be unavailable (private browsing). The app still works, it just won't survive a refresh.
+    // Storage unavailable: nothing to do.
   }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * The database needs layout ids in UUID form. Layouts made by older versions ("L…" ids) get a new
+ * id; layouts that already have one keep it, so opening the same file again replaces them.
+ */
+export function withDatabaseId(layout: RestaurantLayout): RestaurantLayout {
+  return UUID.test(layout.id) ? layout : { ...layout, id: crypto.randomUUID() }
 }
 
 /** Downloads the layouts as a file the user can keep as a backup or open on another device. */
@@ -120,7 +128,7 @@ export function parseLayoutsFile(text: string): RestaurantLayout[] {
 export function createLayout(name: string): RestaurantLayout {
   const now = Date.now()
   return {
-    id: `L${now.toString(36)}`,
+    id: crypto.randomUUID(),
     name,
     width: FLOOR_WIDTH,
     height: FLOOR_HEIGHT,

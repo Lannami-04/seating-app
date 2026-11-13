@@ -1193,3 +1193,79 @@ select.input {
     opacity: 0.22;
   }
 }
+
+/* ---------- Login, restaurant setup ---------- */
+.auth {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--bg);
+  color: var(--ink-muted);
+}
+
+.auth__card {
+  width: min(420px, 100%);
+  padding: 28px 24px;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--ink);
+}
+
+.auth__card h1 {
+  font-size: 26px;
+}
+
+.auth__hint {
+  color: var(--ink-muted);
+}
+
+.auth__error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.home__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* ---------- Connection ---------- */
+/* The screen below an optional connection strip. */
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell__screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Strip across the top while the tablet can't reach the database. */
+.connection-banner {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--danger);
+  color: #fff;
+  text-align: center;
+}
+
+.connection-banner--warn {
+  background: var(--amber);
+}
+
+/* A change the database refused, e.g. "Chair just taken on another tablet". */
+.toast--error {
+  background: var(--danger);
+  max-width: calc(100% - 32px);
+}

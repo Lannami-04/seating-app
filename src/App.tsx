@@ -1,84 +1,94 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import './App.css'
-import type { RestaurantLayout } from './types'
-import { createLayout, loadLayouts, saveLayouts, withAllTablesRegular, withDistinctSectionColors } from './state/layoutStorage'
-import { deleteEventState, loadEventState } from './state/storage'
-import { occupiedTableIds } from './logic/liveLayout'
-import HomeScreen from './components/HomeScreen'
-import LayoutEditor from './components/LayoutEditor'
-import LiveSeatingScreen from './components/LiveSeatingScreen'
-
-/** Which screen is showing: the home menu, designing a layout, or seating guests on it. */
-type Screen = { kind: 'home' } | { kind: 'edit'; id: string } | { kind: 'live'; id: string }
+import { supabase } from './lib/supabase'
+import { useSession } from './state/useSession'
+import { fetchMyRestaurant, toRemoteError, type Restaurant } from './state/remote'
+import LoginScreen from './components/LoginScreen'
+import RestaurantSetup from './components/RestaurantSetup'
+import RestaurantApp from './components/RestaurantApp'
 
 /**
- * The top of the app. Owns the list of restaurant layouts and decides which screen is showing:
- *   home menu  →  Edit layout (design the floor)  ⇄  Seat guests (live seating for the hostess)
+ * The top of the app. Before showing any screen it makes sure of three things:
+ *   1. the app knows which database to use (.env.local),
+ *   2. someone is logged in (Supabase Auth, email + password),
+ *   3. that login belongs to a restaurant (first login: name the restaurant).
+ * Then RestaurantApp shows the home menu, layout editor and live seating.
  */
 function App() {
-  // Loaded once from the browser; saved again after every change.
-  const [stored, setLayouts] = useState<RestaurantLayout[]>(loadLayouts)
-  // Every section always shows in a color that looks different from the other sections.
-  const layouts = useMemo(() => stored.map(withDistinctSectionColors), [stored])
-  const [screen, setScreen] = useState<Screen>({ kind: 'home' })
-
-  useEffect(() => saveLayouts(layouts), [layouts])
-
-  const current = screen.kind === 'home' ? undefined : layouts.find((l) => l.id === screen.id)
-
-  if (current && screen.kind === 'edit') {
+  if (!supabase) {
     return (
-      <LayoutEditor
-        key={current.id}
-        layout={current}
-        // Tables with guests right now (read once when the editor opens; seating can't change while editing).
-        occupiedTableIds={occupiedTableIds(loadEventState(current.id))}
-        onChange={(updated) => setLayouts((all) => all.map((l) => (l.id === updated.id ? updated : l)))}
-        onBack={() => setScreen({ kind: 'home' })}
-        onStartSeating={() => setScreen({ kind: 'live', id: current.id })}
-      />
+      <div className="auth">
+        <div className="auth__card">
+          <h1>Database not set up</h1>
+          <p className="auth__hint">
+            Copy <code>.env.example</code> to <code>.env.local</code>, fill in VITE_SUPABASE_URL and
+            VITE_SUPABASE_PUBLISHABLE_KEY, then restart <code>npm run dev</code>.
+          </p>
+        </div>
+      </div>
     )
   }
+  return <LoggedInGate />
+}
 
-  if (current && screen.kind === 'live') {
+function LoggedInGate() {
+  const { session, loading } = useSession()
+  if (loading) return <div className="auth">Loading…</div>
+  if (!session) return <LoginScreen />
+  // key: a different login starts completely fresh.
+  return <RestaurantGate key={session.user.id} userId={session.user.id} email={session.user.email ?? ''} />
+}
+
+const signOut = () => void supabase?.auth.signOut()
+
+type RestaurantState =
+  | { status: 'loading' }
+  | { status: 'none' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; restaurant: Restaurant }
+
+function RestaurantGate({ userId, email }: { userId: string; email: string }) {
+  const [state, setState] = useState<RestaurantState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0)
+  const retry = useCallback(() => {
+    setState({ status: 'loading' })
+    setAttempt((n) => n + 1)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    fetchMyRestaurant(userId).then(
+      (restaurant) => {
+        if (active) setState(restaurant ? { status: 'ready', restaurant } : { status: 'none' })
+      },
+      (e) => {
+        if (active) setState({ status: 'error', message: toRemoteError(e).message })
+      },
+    )
+    return () => {
+      active = false
+    }
+  }, [userId, attempt])
+
+  if (state.status === 'loading') return <div className="auth">Loading…</div>
+  if (state.status === 'none') return <RestaurantSetup email={email} onCreated={retry} onSignOut={signOut} />
+  if (state.status === 'error') {
     return (
-      <LiveSeatingScreen
-        key={current.id}
-        layout={current}
-        onBack={() => setScreen({ kind: 'home' })}
-        onEditLayout={() => setScreen({ kind: 'edit', id: current.id })}
-        onEndSeating={() => {
-          // End of the event: plain regular tables, no seating left, back to the menu.
-          setLayouts((all) => all.map((l) => (l.id === current.id ? withAllTablesRegular(l) : l)))
-          deleteEventState(current.id)
-          setScreen({ kind: 'home' })
-        }}
-      />
+      <div className="auth">
+        <div className="auth__card">
+          <h1>Can't open the restaurant</h1>
+          <p className="auth__error">{state.message}</p>
+          <button className="btn btn--primary btn--large" onClick={retry}>
+            Try again
+          </button>
+          <button className="btn btn--ghost" onClick={signOut}>
+            Log out
+          </button>
+        </div>
+      </div>
     )
   }
-
-  return (
-    <HomeScreen
-      layouts={layouts}
-      onCreate={(name) => {
-        const layout = createLayout(name)
-        setLayouts((all) => [...all, layout])
-        setScreen({ kind: 'edit', id: layout.id }) // go straight to the blank canvas
-      }}
-      onEdit={(id) => setScreen({ kind: 'edit', id })}
-      onSeat={(id) => setScreen({ kind: 'live', id })}
-      onImport={(imported) =>
-        setLayouts((all) => {
-          const ids = new Set(imported.map((l) => l.id))
-          return [...all.filter((l) => !ids.has(l.id)), ...imported]
-        })
-      }
-      onDelete={(id) => {
-        setLayouts((all) => all.filter((l) => l.id !== id))
-        deleteEventState(id)
-      }}
-    />
-  )
+  return <RestaurantApp restaurant={state.restaurant} onSignOut={signOut} />
 }
 
 export default App // make it reusable elsewhere

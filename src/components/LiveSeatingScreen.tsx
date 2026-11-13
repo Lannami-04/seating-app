@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useReducer, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Family, Reservation, RestaurantLayout } from '../types'
 import type { TableStatus } from '../logic/seating'
 import { assignableEmptyChairs, canReserveTable, chairOwners, tableStatuses } from '../logic/seating'
-import { guestsSeated, toLiveLayout } from '../logic/liveLayout'
+import { guestsSeated, occupiedTableIds, toLiveLayout } from '../logic/liveLayout'
 import { TABLE_KINDS } from '../logic/designTables'
 import { chairsForParty, suggestTable } from '../logic/suggest'
-import { eventReducer } from '../state/eventReducer'
-import { loadEventState, saveEventState } from '../state/storage'
+import { useLiveEvent } from '../state/useLiveEvent'
+import type { LiveAction } from '../state/remote'
 import { nowMs } from '../state/undoHistory'
 import { colors } from '../theme'
 import type { LiveTableLook } from './DesignTableShape'
@@ -20,9 +20,12 @@ import PartySizeBar from './PartySizeBar'
 interface LiveSeatingScreenProps {
   layout: RestaurantLayout
   onBack: () => void
-  onEditLayout: () => void
+  /** Open the editor; `occupied` = tables with guests right now (they get a warning before deleting). */
+  onEditLayout: (occupied: Set<string>) => void
   /** End of the event: clear seating, make every VIP / big group table a plain regular table, go to the menu. */
-  onEndSeating: () => void
+  onEndSeating: (eventId: string | null) => Promise<void>
+  /** Another tablet ended live seating while this one had it open. */
+  onEndedElsewhere: () => void
 }
 
 interface ConfirmRequest {
@@ -62,8 +65,37 @@ function liveLook(status: TableStatus, owners: Map<string, Family>, chairIds: st
  * The hostess's screen for one restaurant: live table colors, open-seat counts,
  * and tapping a table to seat guests chair by chair.
  */
-function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveSeatingScreenProps) {
-  const [event, dispatch] = useReducer(eventReducer, layout.id, loadEventState)
+function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEndedElsewhere }: LiveSeatingScreenProps) {
+  // The shared seating from the database; every tablet on this layout sees the same one.
+  const shared = useLiveEvent(layout)
+  const event = shared.event
+  // Message when the database refused a change, e.g. "Chair just taken on another tablet".
+  const [notice, setNotice] = useState<{ text: string; at: number } | null>(null)
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(null), 6000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+  // Changes when a table must start over (chairs picked there were just taken elsewhere).
+  const [detailVersion, setDetailVersion] = useState(0)
+
+  // Someone else pressed "End live seating".
+  const { ended } = shared
+  useEffect(() => {
+    if (ended) onEndedElsewhere()
+  }, [ended, onEndedElsewhere])
+
+  /**
+   * Sends one change to the database. Resolves ok only once the database accepted it;
+   * otherwise shows why and refreshes the open table so the hostess sees who took the chairs.
+   */
+  async function perform(action: LiveAction): Promise<{ ok: boolean; id: string | null }> {
+    const result = await shared.run(action)
+    if (result.ok) return { ok: true, id: result.id }
+    setNotice({ text: result.message, at: nowMs() })
+    setDetailVersion((v) => v + 1)
+    return { ok: false, id: null }
+  }
   const [openTableId, setOpenTableId] = useState<string | null>(null)
   // null = not making a reservation; otherwise the tables picked so far.
   const [reserving, setReserving] = useState<string[] | null>(null)
@@ -82,10 +114,6 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
   const tablesById = useMemo(() => new Map(live.tables.map((t) => [t.id, t])), [live])
   const tableNames = (ids: string[]) => ids.map((id) => tablesById.get(id)?.name ?? id)
 
-  // Tidy up after layout edits and hold VIP / group tables (also on first open).
-  useEffect(() => dispatch({ type: 'syncLayout', layout, now: nowMs() }), [layout])
-  // Save after every change so a refresh on the tablet keeps the seating.
-  useEffect(() => saveEventState(layout.id, event), [layout.id, event])
 
   // Escape closes the top-most layer (handy on desktop).
   useEffect(() => {
@@ -147,23 +175,22 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
   }
 
   /** Double tap: one party takes all the table's open seats (not on held / reserved tables). */
-  function fillTable(tableId: string) {
+  async function fillTable(tableId: string) {
     if (reserving) return
     const table = tablesById.get(tableId)
     const status = statuses.get(tableId)
     if (!table || !status || status.reservation) return
     const chairIds = table.chairs.filter((c) => c.kind !== 'highchair' && !owners.has(c.id)).map((c) => c.id)
     if (chairIds.length === 0) return
-    const familyId = `F${event.nextFamilyNumber}`
-    dispatch({ type: 'createFamily', tableId, chairIds, now: nowMs() })
+    const result = await perform({ type: 'createFamily', tableId, chairIds })
+    if (!result.ok || !result.id) return
     setPartySize(null)
-    setFilled({ familyId, text: `Seated ${chairIds.length} at ${table.name}`, at: nowMs() })
+    setFilled({ familyId: result.id, text: `Seated ${chairIds.length} at ${table.name}`, at: nowMs() })
   }
 
-  function saveReservation(name: string, partySize: number) {
+  async function saveReservation(name: string, partySize: number) {
     if (!reserving) return
-    dispatch({ type: 'createReservation', name, partySize, tableIds: reserving, now: nowMs() })
-    setReserving(null)
+    if ((await perform({ type: 'createReservation', name, partySize, tableIds: reserving })).ok) setReserving(null)
   }
 
   function confirmSeat(r: Reservation) {
@@ -171,9 +198,8 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
       title: `Seat ${r.name}?`,
       message: `Mark the party of ${r.partySize} as seated. ${tableNames(r.tableIds).join(', ')} will turn green.`,
       confirmLabel: 'Seat party',
-      onConfirm: () => {
-        dispatch({ type: 'seatReservation', reservationId: r.id })
-        setOpenTableId(null)
+      onConfirm: async () => {
+        if ((await perform({ type: 'seatReservation', reservationId: r.id })).ok) setOpenTableId(null)
       },
     })
   }
@@ -186,7 +212,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
         : `${tableNames(r.tableIds).join(', ')} will be open for walk-ins again.`,
       confirmLabel: r.held ? 'Release table' : 'Cancel reservation',
       danger: true,
-      onConfirm: () => dispatch({ type: 'cancelReservation', reservationId: r.id }),
+      onConfirm: () => void perform({ type: 'cancelReservation', reservationId: r.id }),
     })
   }
 
@@ -211,7 +237,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
       message: parts.join(' '),
       confirmLabel: 'Clear table',
       danger: true,
-      onConfirm: () => dispatch({ type: 'clearTable', tableId }),
+      onConfirm: () => void perform({ type: 'clearTable', tableId }),
     })
   }
 
@@ -227,7 +253,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
         `. Seat counts, wheelchair-accessible seats, highchairs and sections stay the same. This can't be undone. You'll go back to the menu.`,
       confirmLabel: 'End live seating',
       danger: true,
-      onConfirm: onEndSeating,
+      onConfirm: () => void onEndSeating(shared.eventId),
     })
   }
 
@@ -237,9 +263,8 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
       message: 'Every guest and reservation is cleared, and VIP / Big group tables are held again. Use this at the end of the night.',
       confirmLabel: 'Clear all seating',
       danger: true,
-      onConfirm: () => {
-        dispatch({ type: 'resetEvent' })
-        dispatch({ type: 'syncLayout', layout, now: nowMs() })
+      onConfirm: async () => {
+        if (!(await perform({ type: 'resetEvent', layout })).ok) return
         setOpenTableId(null)
         setReserving(null)
       },
@@ -248,14 +273,14 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
 
   function goEdit() {
     if (seated === 0) {
-      onEditLayout()
+      onEditLayout(occupiedTableIds(event))
       return
     }
     setConfirm({
       title: 'Edit the layout during service?',
       message: `${seated} guests are seated right now. Their seating is kept, but if you delete tables or remove chairs, guests on them are cleared.`,
       confirmLabel: 'Edit layout',
-      onConfirm: onEditLayout,
+      onConfirm: () => onEditLayout(occupiedTableIds(event)),
     })
   }
 
@@ -280,7 +305,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
             <ReservationBar
               tableNames={reservingTables.map((t) => t.name)}
               seatTotal={reservingTables.reduce((sum, t) => sum + t.chairs.filter((c) => c.kind !== 'highchair').length, 0)}
-              onSave={saveReservation}
+              onSave={(name, size) => void saveReservation(name, size)}
               onCancel={() => setReserving(null)}
             />
           ) : (
@@ -313,9 +338,13 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
         {layout.tables.length === 0 ? (
           <div className="live__empty">
             <p>This restaurant has no tables yet.</p>
-            <button className="btn btn--primary btn--large" onClick={onEditLayout}>
+            <button className="btn btn--primary btn--large" onClick={() => onEditLayout(occupiedTableIds(event))}>
               Design the layout
             </button>
+          </div>
+        ) : !shared.ready ? (
+          <div className="live__empty">
+            <p>{shared.loadError || 'Loading the seating…'}</p>
           </div>
         ) : (
           <LiveFloor
@@ -324,7 +353,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
             selectedTableIds={new Set(reserving ?? [])}
             selectableTableIds={reserving ? reservableIds : null}
             onTableTap={handleTableTap}
-            onTableDoubleTap={fillTable}
+            onTableDoubleTap={(id) => void fillTable(id)}
             suggestedTableId={reserving ? null : (suggestion?.tableId ?? null)}
           />
         )}
@@ -332,7 +361,8 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
 
       {openTable && openStatus && (
         <TableDetail
-          key={openTable.id}
+          key={`${openTable.id}:${detailVersion}`}
+          busy={shared.busy}
           table={openTable}
           // With a party size picked, that many empty chairs (side by side) start selected: just press Done.
           initialSelected={
@@ -345,20 +375,20 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
           owners={owners}
           reservationTableNames={tableNames(openStatus.reservation?.tableIds ?? [])}
           onClose={() => setOpenTableId(null)}
-          onCreateFamily={(chairIds) => {
-            dispatch({ type: 'createFamily', tableId: openTable.id, chairIds, now: nowMs() })
+          onCreateFamily={async (chairIds) => {
+            if (!(await perform({ type: 'createFamily', tableId: openTable.id, chairIds })).ok) return
             setOpenTableId(null)
             setPartySize(null) // party seated: suggestion done
           }}
-          onUpdateFamily={(familyId, chairIds) => dispatch({ type: 'updateFamilyChairs', familyId, chairIds })}
-          onFamilyDone={(familyId) => dispatch({ type: 'markFamilyDone', familyId })}
+          onUpdateFamily={(familyId, chairIds) => void perform({ type: 'updateFamilyChairs', familyId, chairIds })}
+          onFamilyDone={(familyId) => void perform({ type: 'markFamilyDone', familyId })}
           onRemoveFamily={(familyId) =>
             setConfirm({
               title: `Remove family ${familyId}?`,
               message: 'Use this only if the family was entered by mistake. Their chairs are freed.',
               confirmLabel: 'Remove',
               danger: true,
-              onConfirm: () => dispatch({ type: 'removeFamily', familyId }),
+              onConfirm: () => void perform({ type: 'removeFamily', familyId }),
             })
           }
           onSeatReservation={confirmSeat}
@@ -367,19 +397,28 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating }: LiveS
         />
       )}
 
-      {filled && (
-        <div className="toast" role="status" key={filled.at}>
-          <span>{filled.text}</span>
-          <button
-            className="btn toast__undo"
-            onClick={() => {
-              dispatch({ type: 'removeFamily', familyId: filled.familyId })
-              setFilled(null)
-            }}
-          >
-            Undo
+      {notice ? (
+        <div className="toast toast--error" role="alert" key={notice.at}>
+          <span>{notice.text}</span>
+          <button className="btn toast__undo" onClick={() => setNotice(null)}>
+            OK
           </button>
         </div>
+      ) : (
+        filled && (
+          <div className="toast" role="status" key={filled.at}>
+            <span>{filled.text}</span>
+            <button
+              className="btn toast__undo"
+              onClick={() => {
+                void perform({ type: 'removeFamily', familyId: filled.familyId })
+                setFilled(null)
+              }}
+            >
+              Undo
+            </button>
+          </div>
+        )
       )}
 
       {confirm && (

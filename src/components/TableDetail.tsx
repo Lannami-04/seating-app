@@ -26,6 +26,8 @@ interface TableDetailProps {
   onClearTable: () => void
   /** Chairs to have selected when the table opens (from the party-size suggestion). */
   initialSelected?: string[]
+  /** A change is being saved to the database: the save buttons wait. */
+  busy?: boolean
 }
 
 const CHAIR_RADIUS = 1.0
@@ -240,7 +242,7 @@ function TableDetail(props: TableDetailProps) {
         {editingFamily ? (
           <button
             className="btn btn--primary btn--large"
-            disabled={selected.length === 0}
+            disabled={selected.length === 0 || props.busy}
             onClick={() => {
               props.onUpdateFamily(editingFamily.id, selected)
               resetSelection()
@@ -252,13 +254,13 @@ function TableDetail(props: TableDetailProps) {
           <>
             {/* One tap: a single party takes every open seat (wheelchair-accessible seats too, not highchairs). */}
             {selected.length === 0 && !reservation && openSeatIds.length > 0 && (
-              <button className="btn btn--large" onClick={() => props.onCreateFamily(openSeatIds)}>
+              <button className="btn btn--large" onClick={() => props.onCreateFamily(openSeatIds)} disabled={props.busy}>
                 Fill table ({openSeatIds.length})
               </button>
             )}
             {selected.length > 0 && (
-              <button className="btn btn--primary btn--large" onClick={() => props.onCreateFamily(selected)}>
-                Done
+              <button className="btn btn--primary btn--large" onClick={() => props.onCreateFamily(selected)} disabled={props.busy}>
+                {props.busy ? 'Saving…' : 'Done'}
               </button>
             )}
           </>

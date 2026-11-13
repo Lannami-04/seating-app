@@ -12,6 +12,8 @@ import { deleteLayout, fetchLayouts, fetchLiveEvents, saveLayout, toRemoteError,
 
 /** How long to wait after the last edit before saving (ms). */
 const SAVE_DELAY = 700
+/** How long to wait before trying a failed save again (ms). */
+const RETRY_DELAY = 5000
 
 export type SaveStatus = 'saved' | 'saving' | 'failed'
 
@@ -39,6 +41,8 @@ export function useRestaurantLayouts(restaurantId: string): RestaurantLayouts {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
+  // Goes up each time a failed save should be tried again.
+  const [retries, setRetries] = useState(0)
   // Edited here but not saved yet: these win over what the database sends back.
   const pending = useRef(new Map<string, RestaurantLayout>())
   const timers = useRef(new Map<string, number>())
@@ -94,17 +98,22 @@ export function useRestaurantLayouts(restaurantId: string): RestaurantLayouts {
         return true
       } catch {
         setSaveStatus('failed')
+        // Keep trying; the edit stays on this tablet until it is saved.
+        timers.current.set(
+          layoutId,
+          window.setTimeout(() => setRetries((n) => n + 1), RETRY_DELAY),
+        )
         return false
       }
     },
     [restaurantId],
   )
 
-  // Back online: save whatever couldn't be saved while offline.
+  // Back online, or time to retry: save whatever couldn't be saved yet.
   useEffect(() => {
     if (!online) return
     for (const id of [...pending.current.keys()]) void flush(id)
-  }, [online, flush])
+  }, [online, flush, retries])
 
   const updateLayout = useCallback(
     (layout: RestaurantLayout) => {
