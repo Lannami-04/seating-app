@@ -2,10 +2,12 @@
 // (header x-device-id), so "Recent changes" can tell changes made here from changes made on
 // another device, even when every tablet logs in with the same shared staff account.
 
+import { uuid } from './uuid'
+
 const KEY = 'seating-device-id'
 
 function makeId(): string {
-  return crypto.randomUUID().slice(0, 8)
+  return uuid().slice(0, 8)
 }
 
 function loadId(): string {

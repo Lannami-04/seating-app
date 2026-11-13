@@ -4,6 +4,7 @@
 
 import type { ChairKind, DesignFeature, DesignSection, DesignTable, RestaurantLayout, TableShape } from '../types'
 import { SECTION_COLORS } from '../logic/designTables'
+import { uuid } from '../lib/uuid'
 
 interface TableSpec {
   seats: number
@@ -101,7 +102,7 @@ export function sampleLuauLayout(): RestaurantLayout {
     { id: 'buffet', kind: 'buffet', label: 'Buffet', x: 118 + 24 + SHIFT_X, y: 101 + 2.5 + SHIFT_Y, width: 48, height: 5, rotation: 0 },
   ]
   return {
-    id: crypto.randomUUID(),
+    id: uuid(),
     name: 'Sunset Luau (sample)',
     width: 200,
     height: 125,

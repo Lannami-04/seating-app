@@ -4,6 +4,7 @@
 
 import type { DesignSection, DesignTable, RestaurantLayout } from '../types'
 import { looksLikeAny, unusedSectionColor } from '../logic/designTables'
+import { uuid } from '../lib/uuid'
 
 /** Where older versions of the app kept layouts in the browser (before the database). */
 const STORAGE_KEY = 'seating-restaurant-layouts-v1'
@@ -98,7 +99,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * id; layouts that already have one keep it, so opening the same file again replaces them.
  */
 export function withDatabaseId(layout: RestaurantLayout): RestaurantLayout {
-  return UUID.test(layout.id) ? layout : { ...layout, id: crypto.randomUUID() }
+  return UUID.test(layout.id) ? layout : { ...layout, id: uuid() }
 }
 
 /** Downloads the layouts as a file the user can keep as a backup or open on another device. */
@@ -128,7 +129,7 @@ export function parseLayoutsFile(text: string): RestaurantLayout[] {
 export function createLayout(name: string): RestaurantLayout {
   const now = Date.now()
   return {
-    id: crypto.randomUUID(),
+    id: uuid(),
     name,
     width: FLOOR_WIDTH,
     height: FLOOR_HEIGHT,
