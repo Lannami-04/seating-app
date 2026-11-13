@@ -55,6 +55,7 @@ supabase/migrations/       the database, as SQL (paste into the Supabase SQL Edi
   …_security.sql           2. Row Level Security: who may read / change what
   …_functions.sql          3. functions the app calls for every change (seat_family, save_layout, ...)
   …_realtime.sql           4. which tables send real-time updates
+  …_corrections.sql        5. move a family, "Recent changes" log, table spot checks
 
 src/
   types.ts                 data shapes (interfaces) shared by everything
@@ -263,11 +264,31 @@ Two hostesses tap the same chair on two tablets at the same moment. Who gets it?
 Tables work the same way: `reservation_tables` allows only one **active** reservation per table and event,
 so two tablets can't reserve the same table either.
 
+### Fast corrections from a second device
+
+A lead with a second tablet can fix the floor while the hostess keeps seating:
+
+- **Move a family**: tap the family's color → **Move to another table** → tap the new table (only tables with
+  enough open seats can be tapped) → **Move here**. Chairs side by side are already picked. The database
+  function `move_family` does the whole move in one transaction (old chairs freed, new chairs taken), with the
+  same event lock and `chair_assignments` key as seating, so a chair taken meanwhile gives "Chair just taken".
+- **Quick edits** in the family menu: **− 1 seat / + 1 seat** (the closest free chair, so the family stays
+  together) and **They left** (frees the chairs, still counts the guests).
+- **Recent changes** (under the header): every seating function also writes a line to `event_changes`, e.g.
+  "Family F12 moved P1 → P3". Each tablet sends a random **device id** with every request (header
+  `x-device-id`, see `src/lib/device.ts`), so the list can say "this tablet" or "other device" even with one
+  shared login, and the badge counts new changes from other devices. Tap a line to open that table.
+- **Checked**: a button on each table that records in `table_checks` when someone last compared it with the
+  real floor. The table then shows a small ✓, and its details say "checked 7:42 PM".
+
+Nothing new is needed for real-time: every change still bumps `events.version`, and `get_event_state` now also
+returns the 40 newest changes and the checks.
+
 ### Setting up the database (once)
 
 1. In the Supabase dashboard, open **SQL Editor → New query**. Paste the whole contents of each file in
-   `supabase/migrations/`, **in order** (`…01_schema`, `…02_security`, `…03_functions`, `…04_realtime`),
-   and press **Run** after each one.
+   `supabase/migrations/`, **in order** (`…01_schema`, `…02_security`, `…03_functions`, `…04_realtime`,
+   `20261114000001_corrections`), and press **Run** after each one.
 2. **Authentication → Users → Add user**: create the restaurant's shared staff account (email + password,
    tick "Auto Confirm User").
 3. Recommended: **Authentication → Sign In / Providers**: turn off "Allow new users to sign up", so only
