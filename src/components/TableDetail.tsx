@@ -3,6 +3,7 @@ import type { Chair as ChairData, Family, Reservation, Table } from '../types'
 import type { TableStatus } from '../logic/seating'
 import { chairPositions, seatCount, tableBounds, tableSize } from '../logic/geometry'
 import { pickFamilyColor } from '../logic/familyColors'
+import { clockTime } from '../logic/clock'
 import { colors } from '../theme'
 import Chair from './Chair'
 import FamilyLegend from './FamilyLegend'
@@ -28,6 +29,32 @@ interface TableDetailProps {
   initialSelected?: string[]
   /** A change is being saved to the database: the save buttons wait. */
   busy?: boolean
+  /** Start moving a family to another table (the floor then asks for the new table). */
+  onMoveFamily: (family: Family) => void
+  /** A family being moved here from another table: pick its chairs, then "Move here". */
+  moving?: Family
+  /** "Checked": someone looked at this table on the real floor and it matches. */
+  onCheck: () => void
+  /** When the table was last checked (ms), if ever this event. */
+  checkedAt?: number
+}
+
+/**
+ * The free seat closest to a family's chairs (seats are numbered around the table), so "+1 seat" keeps
+ * the family together. Wheelchair-accessible seats are used last. Null if no seat is free.
+ */
+function closestFreeSeat(table: Table, owners: Map<string, Family>, family: Family): string | null {
+  const seats = table.chairs.filter((c) => c.kind !== 'highchair')
+  const n = seats.length
+  const mine = seats.map((c, i) => (family.chairIds.includes(c.id) ? i : -1)).filter((i) => i >= 0)
+  let best: { id: string; cost: number } | null = null
+  seats.forEach((c, i) => {
+    if (owners.has(c.id)) return
+    const ring = mine.length ? Math.min(...mine.map((j) => Math.min(Math.abs(i - j), n - Math.abs(i - j)))) : 0
+    const cost = ring + (c.kind === 'wheelchair' ? n : 0)
+    if (!best || cost < best.cost) best = { id: c.id, cost }
+  })
+  return (best as { id: string } | null)?.id ?? null
 }
 
 const CHAIR_RADIUS = 1.0
@@ -123,7 +150,15 @@ function TableDetail(props: TableDetailProps) {
     wheelchairs > 0 ? `${wheelchairs} wheelchair accessible` : '',
     highchairs > 0 ? `+${highchairs} highchair${highchairs === 1 ? '' : 's'}` : '',
   ].filter(Boolean)
-  const subtitle = [`${seats} seats`, ...extras, reservation ? 'reserved' : `${status.remaining} open`].join(' · ')
+  const subtitle = [
+    `${seats} seats`,
+    ...extras,
+    reservation ? 'reserved' : `${status.remaining} open`,
+    props.checkedAt ? `checked ${clockTime(props.checkedAt)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const moving = props.moving
 
   return (
     <div className="detail" role="dialog" aria-modal="true" aria-label={`Table ${table.name}`}>
@@ -137,9 +172,19 @@ function TableDetail(props: TableDetailProps) {
           </h2>
           <div className="detail__subtitle">{subtitle}</div>
         </div>
-        <button className="btn btn--quiet-danger" onClick={props.onClearTable} disabled={!canClear}>
-          Clear table
-        </button>
+        <div className="detail__header-actions">
+          <button
+            className="btn detail__check"
+            onClick={props.onCheck}
+            disabled={props.busy}
+            title="Tap after looking at this table on the floor: it matches what the app shows"
+          >
+            ✓ Checked
+          </button>
+          <button className="btn btn--quiet-danger" onClick={props.onClearTable} disabled={!canClear || !!moving}>
+            Clear table
+          </button>
+        </div>
       </header>
 
       <div className="detail__body">
@@ -204,6 +249,17 @@ function TableDetail(props: TableDetailProps) {
               {menuFamily && !editingId && (
                 <FamilyMenu
                   family={menuFamily}
+                  busy={props.busy}
+                  onMove={() => props.onMoveFamily(menuFamily)}
+                  onAddSeat={(() => {
+                    const free = closestFreeSeat(table, owners, menuFamily)
+                    return free ? () => props.onUpdateFamily(menuFamily.id, [...menuFamily.chairIds, free]) : null
+                  })()}
+                  onRemoveSeat={
+                    menuFamily.chairIds.length > 1
+                      ? () => props.onUpdateFamily(menuFamily.id, menuFamily.chairIds.slice(0, -1))
+                      : null
+                  }
                   onEditChairs={() => startEditing(menuFamily)}
                   onDone={() => {
                     props.onFamilyDone(menuFamily.id)
@@ -224,7 +280,9 @@ function TableDetail(props: TableDetailProps) {
       {/* The footer is always shown so the table area never resizes (chairs would jump under the finger). */}
       <footer className="detail__footer">
         <div className="detail__footer-text">
-          {editingFamily
+          {moving
+            ? `Moving family ${moving.id} here · ${selected.length} of ${moving.guestCount} chairs picked. Tap chairs to change.`
+            : editingFamily
             ? `Editing ${editingFamily.id}: tap chairs to add or remove · ${selected.length} selected`
             : selected.length > 0
               ? `New family · ${selected.length} ${selected.length === 1 ? 'chair' : 'chairs'}`
@@ -253,14 +311,14 @@ function TableDetail(props: TableDetailProps) {
         ) : (
           <>
             {/* One tap: a single party takes every open seat (wheelchair-accessible seats too, not highchairs). */}
-            {selected.length === 0 && !reservation && openSeatIds.length > 0 && (
+            {!moving && selected.length === 0 && !reservation && openSeatIds.length > 0 && (
               <button className="btn btn--large" onClick={() => props.onCreateFamily(openSeatIds)} disabled={props.busy}>
                 Fill table ({openSeatIds.length})
               </button>
             )}
             {selected.length > 0 && (
               <button className="btn btn--primary btn--large" onClick={() => props.onCreateFamily(selected)} disabled={props.busy}>
-                {props.busy ? 'Saving…' : 'Done'}
+                {props.busy ? 'Saving…' : moving ? 'Move here' : 'Done'}
               </button>
             )}
           </>

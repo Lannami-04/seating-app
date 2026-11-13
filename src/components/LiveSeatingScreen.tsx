@@ -16,6 +16,8 @@ import TableDetail from './TableDetail'
 import ReservationBar from './ReservationBar'
 import ConfirmDialog from './ConfirmDialog'
 import PartySizeBar from './PartySizeBar'
+import RecentChanges from './RecentChanges'
+import { DEVICE_ID } from '../lib/device'
 
 interface LiveSeatingScreenProps {
   layout: RestaurantLayout
@@ -100,8 +102,13 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
   // null = not making a reservation; otherwise the tables picked so far.
   const [reserving, setReserving] = useState<string[] | null>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
-  // "Seated 8 at T5 · Undo" message after filling a table with a double tap.
-  const [filled, setFilled] = useState<{ familyId: string; text: string; at: number } | null>(null)
+  // "Seated 8 at T5 · Undo" after a double tap, or "Moved F7 P1 → P3" after a move.
+  const [filled, setFilled] = useState<{ familyId?: string; text: string; at: number } | null>(null)
+  // The family being moved to another table (the floor asks for the new table), or null.
+  const [movingId, setMovingId] = useState<string | null>(null)
+  // "Recent changes" list open, and the newest change already looked at (null = not loaded yet).
+  const [showRecent, setShowRecent] = useState(false)
+  const [seenUpTo, setSeenUpTo] = useState<number | null>(null)
   useEffect(() => {
     if (!filled) return
     const timer = window.setTimeout(() => setFilled(null), 6000)
@@ -122,14 +129,25 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
       if (confirm) setConfirm(null)
       else if (openTableId) setOpenTableId(null)
       else if (reserving) setReserving(null)
+      else if (movingId) setMovingId(null)
+      else if (showRecent) setShowRecent(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [confirm, openTableId, reserving])
+  }, [confirm, openTableId, reserving, movingId, showRecent])
+
+  // Recent changes: what was already there when seating opened isn't "new"; while the list is open, everything is seen.
+  const newestChange = shared.changes[0]?.id ?? 0
+  if (shared.ready && (seenUpTo === null || (showRecent && seenUpTo !== newestChange))) {
+    setSeenUpTo(newestChange)
+  }
+  const unseen = shared.changes.filter((c) => c.deviceId !== DEVICE_ID && c.id > (seenUpTo ?? Infinity)).length
 
   // Everything below is worked out from `event` + layout each time; nothing is stored twice.
   const statuses = useMemo(() => tableStatuses(live, event.families, event.reservations), [live, event])
   const owners = useMemo(() => chairOwners(event.families), [event.families])
+  // Read fresh from the shared seating: if another device moves or removes the family, moving stops by itself.
+  const moving: Family | null = (movingId && event.families.find((f) => f.id === movingId && f.status === 'seated')) || null
   const looks = useMemo(() => {
     const map = new Map<string, LiveTableLook>()
     const designed = new Map(layout.tables.map((t) => [t.id, t]))
@@ -142,10 +160,18 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
       if (status.reservation?.held && status.reservation.status !== 'seated' && dt?.kind === 'group' && !dt.guestName.trim()) {
         look.centerText = String(dt.seats)
       }
+      look.checkedAt = shared.checks.get(t.id)
       map.set(t.id, look)
     }
     return map
-  }, [live, layout, statuses, owners])
+  }, [live, layout, statuses, owners, shared.checks])
+  // While moving a family: tables with room for the whole family (not reserved, not where it sits now).
+  const movableIds = useMemo(() => {
+    if (!moving) return null
+    const ids = new Set<string>()
+    for (const [id, st] of statuses) if (id !== moving.tableId && !st.reservation && st.remaining >= moving.guestCount) ids.add(id)
+    return ids
+  }, [moving, statuses])
   const reservableIds = useMemo(
     () => new Set(live.tables.filter((t) => canReserveTable(t.id, event.families, event.reservations)).map((t) => t.id)),
     [live, event],
@@ -166,6 +192,10 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
         : `No single table has ${partySize} open seats`
 
   function handleTableTap(tableId: string) {
+    if (moving) {
+      if (movableIds?.has(tableId)) setOpenTableId(tableId)
+      return
+    }
     if (reserving) {
       if (!reservableIds.has(tableId)) return
       setReserving(reserving.includes(tableId) ? reserving.filter((id) => id !== tableId) : [...reserving, tableId])
@@ -176,7 +206,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
 
   /** Double tap: one party takes all the table's open seats (not on held / reserved tables). */
   async function fillTable(tableId: string) {
-    if (reserving) return
+    if (reserving || moving) return
     const table = tablesById.get(tableId)
     const status = statuses.get(tableId)
     if (!table || !status || status.reservation) return
@@ -301,7 +331,17 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
           </div>
         </div>
         <div className="topbar__actions">
-          {reserving ? (
+          {moving ? (
+            <div className="move-bar">
+              <span>
+                Moving <strong>family {moving.id}</strong> ({moving.guestCount}) from {tablesById.get(moving.tableId)?.name}: tap a
+                table with {moving.guestCount} open {moving.guestCount === 1 ? 'seat' : 'seats'}
+              </span>
+              <button className="btn" onClick={() => setMovingId(null)}>
+                Cancel
+              </button>
+            </div>
+          ) : reserving ? (
             <ReservationBar
               tableNames={reservingTables.map((t) => t.name)}
               seatTotal={reservingTables.reduce((sum, t) => sum + t.chairs.filter((c) => c.kind !== 'highchair').length, 0)}
@@ -330,7 +370,19 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
       {/* Its own strip under the top bar, so it never covers anything on the floor. */}
       {layout.tables.length > 0 && (
         <div className="live__strip">
-          {!reserving && <PartySizeBar size={partySize} onPick={setPartySize} note={suggestionNote} />}
+          {!reserving && !moving && <PartySizeBar size={partySize} onPick={setPartySize} note={suggestionNote} />}
+          <button
+            className={`btn btn--ghost recent-btn${unseen > 0 ? ' recent-btn--new' : ''}`}
+            onClick={() => setShowRecent((v) => !v)}
+            aria-expanded={showRecent}
+          >
+            Recent changes
+            {unseen > 0 && (
+              <span className="recent-btn__badge" aria-label={`${unseen} new from other devices`}>
+                {unseen}
+              </span>
+            )}
+          </button>
         </div>
       )}
 
@@ -351,10 +403,21 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
             layout={layout}
             looks={looks}
             selectedTableIds={new Set(reserving ?? [])}
-            selectableTableIds={reserving ? reservableIds : null}
+            selectableTableIds={reserving ? reservableIds : movableIds}
             onTableTap={handleTableTap}
             onTableDoubleTap={(id) => void fillTable(id)}
-            suggestedTableId={reserving ? null : (suggestion?.tableId ?? null)}
+            suggestedTableId={reserving || moving ? null : (suggestion?.tableId ?? null)}
+          />
+        )}
+        {showRecent && (
+          <RecentChanges
+            changes={shared.changes}
+            seenUpTo={seenUpTo ?? 0}
+            onOpenTable={(id) => {
+              setShowRecent(false)
+              if (!moving && !reserving) setOpenTableId(id)
+            }}
+            onClose={() => setShowRecent(false)}
           />
         )}
       </main>
@@ -364,18 +427,36 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
           key={`${openTable.id}:${detailVersion}`}
           busy={shared.busy}
           table={openTable}
-          // With a party size picked, that many empty chairs (side by side) start selected: just press Done.
+          // Moving a family here, or a party size picked: that many empty chairs (side by side) start selected.
           initialSelected={
-            partySize && !openStatus.reservation && openStatus.remaining >= partySize
-              ? chairsForParty(openTable, owners, partySize)
-              : undefined
+            moving
+              ? chairsForParty(openTable, owners, moving.guestCount)
+              : partySize && !openStatus.reservation && openStatus.remaining >= partySize
+                ? chairsForParty(openTable, owners, partySize)
+                : undefined
           }
+          moving={moving ?? undefined}
+          checkedAt={shared.checks.get(openTable.id)}
+          onCheck={() => void perform({ type: 'checkTable', tableId: openTable.id })}
+          onMoveFamily={(family) => {
+            setOpenTableId(null)
+            setPartySize(null)
+            setMovingId(family.id)
+          }}
           sectionName={sectionName(openTable.id)}
           status={openStatus}
           owners={owners}
           reservationTableNames={tableNames(openStatus.reservation?.tableIds ?? [])}
           onClose={() => setOpenTableId(null)}
           onCreateFamily={async (chairIds) => {
+            if (moving) {
+              const from = tablesById.get(moving.tableId)?.name ?? ''
+              if (!(await perform({ type: 'moveFamily', familyId: moving.id, tableId: openTable.id, chairIds })).ok) return
+              setFilled({ text: `Moved family ${moving.id} ${from} → ${openTable.name}`, at: nowMs() })
+              setMovingId(null)
+              setOpenTableId(null)
+              return
+            }
             if (!(await perform({ type: 'createFamily', tableId: openTable.id, chairIds })).ok) return
             setOpenTableId(null)
             setPartySize(null) // party seated: suggestion done
@@ -408,15 +489,17 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
         filled && (
           <div className="toast" role="status" key={filled.at}>
             <span>{filled.text}</span>
-            <button
-              className="btn toast__undo"
-              onClick={() => {
-                void perform({ type: 'removeFamily', familyId: filled.familyId })
-                setFilled(null)
-              }}
-            >
-              Undo
-            </button>
+            {filled.familyId && (
+              <button
+                className="btn toast__undo"
+                onClick={() => {
+                  if (filled.familyId) void perform({ type: 'removeFamily', familyId: filled.familyId })
+                  setFilled(null)
+                }}
+              >
+                Undo
+              </button>
+            )}
           </div>
         )
       )}

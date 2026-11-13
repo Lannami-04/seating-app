@@ -15,6 +15,8 @@ export interface LiveTableLook {
   centerText: string
   /** Color of each chair, by position. */
   chairFill: (index: number) => string
+  /** When someone last checked this table against the real floor (ms), if ever: a small ✓ is shown. */
+  checkedAt?: number
 }
 
 interface DesignTableShapeProps {
@@ -192,6 +194,21 @@ function DesignTableShape({ table, selected = false, picked = false, showChairs 
             </g>
           )
         })}
+
+      {/* Spot-checked: a small, quiet check mark at the bottom-left of the table top. */}
+      {showText && !showChairs && live?.checkedAt !== undefined && (
+        <g pointerEvents="none" aria-label="checked against the floor">
+          <circle cx={-corner} cy={corner} r={badgeR * 0.85} fill={colors.white} stroke="#8AA79A" strokeWidth={1.2 / scale} />
+          <path
+            d={`M ${-corner - badgeR * 0.4} ${corner} l ${badgeR * 0.3} ${badgeR * 0.3} l ${badgeR * 0.5} ${-badgeR * 0.55}`}
+            fill="none"
+            stroke="#3D8B5F"
+            strokeWidth={2 / scale}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+      )}
 
       {/* Text is drawn outside the turned group so it always reads upright. */}
       {showText && (
