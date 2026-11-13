@@ -56,6 +56,7 @@ supabase/migrations/       the database, as SQL (paste into the Supabase SQL Edi
   …_functions.sql          3. functions the app calls for every change (seat_family, save_layout, ...)
   …_realtime.sql           4. which tables send real-time updates
   …_corrections.sql        5. move a family, "Recent changes" log, table spot checks
+  …_party_reservations.sql 6. "Back to reserved", and triggers that refuse walk-ins on reserved tables
 
 src/
   types.ts                 data shapes (interfaces) shared by everything
@@ -262,7 +263,13 @@ Two hostesses tap the same chair on two tablets at the same moment. Who gets it?
    screen reloads that table so the hostess sees who got it and can pick other chairs.
 
 Tables work the same way: `reservation_tables` allows only one **active** reservation per table and event,
-so two tablets can't reserve the same table either.
+so two tablets can't reserve the same table either. Two **triggers** (small functions Postgres runs on every
+insert) close the last gap: a chair can't be assigned at a table that belongs to an active reservation, and a
+table with guests can't be added to a reservation.
+
+A reservation over several tables is **one party**: seating it (double-tap any of its tables, or **Seat party**),
+**Back to reserved**, **Clear table** and **Release** each change the one reservation row, so every one of its
+tables changes together on every tablet.
 
 ### Fast corrections from a second device
 
@@ -288,7 +295,7 @@ returns the 40 newest changes and the checks.
 
 1. In the Supabase dashboard, open **SQL Editor → New query**. Paste the whole contents of each file in
    `supabase/migrations/`, **in order** (`…01_schema`, `…02_security`, `…03_functions`, `…04_realtime`,
-   `20261114000001_corrections`), and press **Run** after each one.
+   `20261114000001_corrections`, `20261115000001_party_reservations`), and press **Run** after each one.
 2. **Authentication → Users → Add user**: create the restaurant's shared staff account (email + password,
    tick "Auto Confirm User").
 3. Recommended: **Authentication → Sign In / Providers**: turn off "Allow new users to sign up", so only
