@@ -6,6 +6,7 @@
 // user may read or change is decided by Row Level Security rules in the database.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { DEVICE_ID } from './device'
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined
@@ -16,5 +17,7 @@ export const supabase: SupabaseClient | null =
     ? createClient(url, key, {
         auth: { persistSession: true, autoRefreshToken: true },
         realtime: { params: { eventsPerSecond: 20 } },
+        // Lets the database note which device made each change (see "Recent changes").
+        global: { headers: { 'x-device-id': DEVICE_ID } },
       })
     : null

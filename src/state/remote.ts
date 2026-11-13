@@ -174,10 +174,27 @@ export async function endEvent(eventId: string): Promise<void> {
   unwrap(await db().rpc('end_event', { p_event: eventId }))
 }
 
-/** The seating as the app knows it, plus what the database adds: a version number and whether it ended. */
+/** One line of "Recent changes", e.g. "Family F12 moved P1 → P3". */
+export interface EventChange {
+  id: number
+  /** When it happened (ms since 1970, like Date.now()). */
+  at: number
+  message: string
+  /** The device that made it (compare with DEVICE_ID), or null if unknown. */
+  deviceId: string | null
+  tableIds: string[]
+}
+
+/**
+ * The seating as the app knows it, plus what the database adds: a version number, whether it ended,
+ * the newest changes (newest first) and when each table was last checked against the floor.
+ */
 export interface RemoteEventState extends EventState {
   version: number
   ended: boolean
+  changes: EventChange[]
+  /** Table id → when someone last pressed "Checked" (ms). */
+  checks: Map<string, number>
 }
 
 export async function fetchEventState(eventId: string): Promise<RemoteEventState> {
@@ -189,9 +206,16 @@ export async function fetchEventState(eventId: string): Promise<RemoteEventState
     families: Family[]
     reservations: Reservation[]
     heldTableIds: string[]
+    changes?: EventChange[]
+    checks?: { tableId: string; at: number }[]
   } | null
   if (!s) throw new RemoteError('event_ended', MESSAGES.event_ended)
-  return { ...s, reservations: s.reservations.map((r) => (r.held ? r : { ...r, held: undefined })) }
+  return {
+    ...s,
+    reservations: s.reservations.map((r) => (r.held ? r : { ...r, held: undefined })),
+    changes: s.changes ?? [],
+    checks: new Map((s.checks ?? []).map((c) => [c.tableId, c.at])),
+  }
 }
 
 /** Holds VIP / big-group tables for their party (safe to call from several tablets at once). */
@@ -203,6 +227,9 @@ export async function syncHolds(eventId: string, layout: RestaurantLayout): Prom
 export type LiveAction =
   | { type: 'createFamily'; tableId: string; chairIds: string[] }
   | { type: 'updateFamilyChairs'; familyId: string; chairIds: string[] }
+  /** To other chairs at the same table, or to another table. */
+  | { type: 'moveFamily'; familyId: string; tableId: string; chairIds: string[] }
+  | { type: 'checkTable'; tableId: string }
   | { type: 'markFamilyDone'; familyId: string }
   | { type: 'removeFamily'; familyId: string }
   | { type: 'createReservation'; name: string; partySize: number; tableIds: string[] }
@@ -225,6 +252,19 @@ export async function runLiveAction(eventId: string, action: LiveAction, current
     }
     case 'updateFamilyChairs':
       unwrap(await db().rpc('update_family_chairs', { p_event, p_family: action.familyId, p_chairs: action.chairIds }))
+      return null
+    case 'moveFamily': {
+      // Keep the family's color unless it would look like another family's at the new table.
+      const others = activeFamilies(current.families).filter((f) => f.tableId === action.tableId && f.id !== action.familyId)
+      const own = current.families.find((f) => f.id === action.familyId)
+      const p_color = own && !others.some((f) => f.color === own.color) ? own.color : pickFamilyColor(others)
+      unwrap(
+        await db().rpc('move_family', { p_event, p_family: action.familyId, p_table: action.tableId, p_chairs: action.chairIds, p_color }),
+      )
+      return null
+    }
+    case 'checkTable':
+      unwrap(await db().rpc('check_table', { p_event, p_table: action.tableId }))
       return null
     case 'markFamilyDone':
       unwrap(await db().rpc('finish_family', { p_event, p_family: action.familyId }))

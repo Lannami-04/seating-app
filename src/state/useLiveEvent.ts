@@ -17,10 +17,13 @@ import {
   startEvent,
   syncHolds,
   toRemoteError,
+  type EventChange,
   type LiveAction,
   type RemoteEventState,
 } from './remote'
 
+const NO_CHANGES: EventChange[] = []
+const NO_CHECKS = new Map<string, number>()
 const EMPTY: EventState = { families: [], reservations: [], nextFamilyNumber: 1, nextReservationNumber: 1, heldTableIds: [] }
 
 export type RunResult = { ok: true; id: string | null } | { ok: false; code: string; message: string }
@@ -29,6 +32,10 @@ export interface LiveEvent {
   eventId: string | null
   /** The seating as last confirmed by the database (empty while loading). */
   event: EventState
+  /** Newest changes first ("Recent changes"). */
+  changes: EventChange[]
+  /** Table id → when it was last checked against the floor (ms). */
+  checks: Map<string, number>
   /** False until the first load finished. */
   ready: boolean
   /** True once anyone ended this live seating. */
@@ -137,6 +144,8 @@ export function useLiveEvent(layout: RestaurantLayout): LiveEvent {
   return {
     eventId,
     event: remote ?? EMPTY,
+    changes: remote?.changes ?? NO_CHANGES,
+    checks: remote?.checks ?? NO_CHECKS,
     ready: remote !== null,
     ended: remote?.ended ?? false,
     busy,
