@@ -234,6 +234,8 @@ export type LiveAction =
   | { type: 'removeFamily'; familyId: string }
   | { type: 'createReservation'; name: string; partySize: number; tableIds: string[] }
   | { type: 'seatReservation'; reservationId: string }
+  /** A seated party goes back to waiting. */
+  | { type: 'unseatReservation'; reservationId: string }
   | { type: 'cancelReservation'; reservationId: string }
   | { type: 'clearTable'; tableId: string }
   | { type: 'resetEvent'; layout: RestaurantLayout }
@@ -278,6 +280,9 @@ export async function runLiveAction(eventId: string, action: LiveAction, current
       ) as string
     case 'seatReservation':
       unwrap(await db().rpc('seat_reservation', { p_event, p_reservation: action.reservationId }))
+      return null
+    case 'unseatReservation':
+      unwrap(await db().rpc('unseat_reservation', { p_event, p_reservation: action.reservationId }))
       return null
     case 'cancelReservation':
       unwrap(await db().rpc('cancel_reservation', { p_event, p_reservation: action.reservationId }))

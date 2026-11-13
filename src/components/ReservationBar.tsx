@@ -25,8 +25,13 @@ function ReservationBar({ tableNames, seatTotal, onSave, onCancel }: Reservation
         if (canSave) onSave(name, partySize)
       }}
     >
-      <div className="resbar__tables">
-        {tableNames.length === 0 ? 'Tap empty tables to reserve them' : `${tableNames.join(', ')} · ${seatTotal} seats`}
+      {/* Fixed width, so the bar (and the floor below it) never jumps while tables are being tapped. */}
+      <div className="resbar__tables" title={tableNames.join(', ')}>
+        {tableNames.length === 0
+          ? 'Tap tables to reserve'
+          : tableNames.length <= 3
+            ? `${tableNames.join(', ')} · ${seatTotal} seats`
+            : `${tableNames.length} tables · ${seatTotal} seats`}
       </div>
       <input
         className="input"

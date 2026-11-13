@@ -1421,3 +1421,23 @@ select.input {
   color: var(--amber);
   font-weight: 700;
 }
+
+/* ---------- Picking tables: nothing above the floor changes size between taps ---------- */
+.resbar__tables {
+  width: 190px;
+  flex-shrink: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.live__strip-slot {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+.live__strip-slot--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}

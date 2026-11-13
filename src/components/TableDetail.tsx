@@ -24,6 +24,7 @@ interface TableDetailProps {
   onRemoveFamily: (familyId: string) => void
   onSeatReservation: (reservation: Reservation) => void
   onCancelReservation: (reservation: Reservation) => void
+  onUnseatReservation: (reservation: Reservation) => void
   onClearTable: () => void
   /** Chairs to have selected when the table opens (from the party-size suggestion). */
   initialSelected?: string[]
@@ -235,6 +236,8 @@ function TableDetail(props: TableDetailProps) {
               tableNames={reservationTableNames}
               onSeat={() => props.onSeatReservation(reservation)}
               onCancel={() => props.onCancelReservation(reservation)}
+              onUnseat={() => props.onUnseatReservation(reservation)}
+              busy={props.busy}
             />
           ) : (
             <>

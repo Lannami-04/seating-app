@@ -161,6 +161,12 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
 
   // Telling one tap from two: the first tap waits a moment; a second tap on the same table in time is a double tap.
   const pendingTap = useRef<{ tableId: string; timer: number } | null>(null)
+  // The delayed tap must call the screen's newest handler, not the one from when the finger went down
+  // (that one can hold an out-of-date selection, e.g. the tables picked for a reservation so far).
+  const latestTap = useRef(onTableTap)
+  useEffect(() => {
+    latestTap.current = onTableTap
+  }, [onTableTap])
   useEffect(
     () => () => {
       if (pendingTap.current) window.clearTimeout(pendingTap.current.timer)
@@ -187,7 +193,7 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
     }
     const timer = window.setTimeout(() => {
       pendingTap.current = null
-      onTableTap(tableId)
+      latestTap.current(tableId)
     }, DOUBLE_TAP_MS)
     pendingTap.current = { tableId, timer }
   }
