@@ -57,6 +57,7 @@ supabase/migrations/       the database, as SQL (paste into the Supabase SQL Edi
   …_realtime.sql           4. which tables send real-time updates
   …_corrections.sql        5. move a family, "Recent changes" log, table spot checks
   …_party_reservations.sql 6. "Back to reserved", and triggers that refuse walk-ins on reserved tables
+  …_big_groups.sql         7. tables.group_id: a big group is held and seated as ONE party
 
 src/
   types.ts                 data shapes (interfaces) shared by everything
@@ -271,6 +272,12 @@ A reservation over several tables is **one party**: seating it (double-tap any o
 **Back to reserved**, **Clear table** and **Release** each change the one reservation row, so every one of its
 tables changes together on every tablet.
 
+**Big groups** from the layout are parties too. Tables you make into a big group together share a `groupId`
+(`DesignTable.groupId`, column `tables.group_id`). `heldGroups` in `logic/liveLayout.ts` turns each group into
+one hold, and the database function `apply_holds` keeps exactly one reservation per group (merging holds that
+were made table by table before, and adding tables that join the group later). On the floor, the group's name
+is drawn once across its tables (`groupKey` in `TableNameLabels.tsx`).
+
 ### Fast corrections from a second device
 
 A lead with a second tablet can fix the floor while the hostess keeps seating:
@@ -295,7 +302,8 @@ returns the 40 newest changes and the checks.
 
 1. In the Supabase dashboard, open **SQL Editor → New query**. Paste the whole contents of each file in
    `supabase/migrations/`, **in order** (`…01_schema`, `…02_security`, `…03_functions`, `…04_realtime`,
-   `20261114000001_corrections`, `20261115000001_party_reservations`), and press **Run** after each one.
+   `20261114000001_corrections`, `20261115000001_party_reservations`, `20261116000001_big_groups`), and press
+   **Run** after each one.
 2. **Authentication → Users → Add user**: create the restaurant's shared staff account (email + password,
    tick "Auto Confirm User").
 3. Recommended: **Authentication → Sign In / Providers**: turn off "Allow new users to sign up", so only
