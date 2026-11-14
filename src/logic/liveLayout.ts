@@ -37,20 +37,29 @@ export interface HeldGroup {
 
 /**
  * VIP and Big group tables are held for their party during service.
- * Tables with the same name form one party (e.g. two VIP tables for "Mayor Kealoha");
- * a group table with no name is held on its own.
+ * - Big group tables made into a group together (same groupId) are ONE party, named or not.
+ * - Otherwise tables with the same name form one party (e.g. two VIP tables for "Mayor Kealoha");
+ *   an unnamed table is held on its own.
  */
 export function heldGroups(layout: RestaurantLayout): HeldGroup[] {
   const groups = new Map<string, HeldGroup>()
   for (const t of layout.tables) {
     if (t.kind === 'regular') continue
     const name = t.guestName.trim()
-    const label = name || (t.kind === 'vip' ? 'VIP' : `Big group ${t.name}`)
-    const key = name ? `${t.kind}:${name.toLowerCase()}` : `table:${t.id}`
-    const g = groups.get(key) ?? { name: label, tableIds: [], partySize: 0 }
+    const key =
+      t.kind === 'group' && t.groupId ? `grp:${t.groupId}` : name ? `${t.kind}:${name.toLowerCase()}` : `table:${t.id}`
+    const g = groups.get(key) ?? { name: '', tableIds: [], partySize: 0 }
+    // The party's name: the first name found on any of its tables.
+    if (!g.name && name) g.name = name
     g.tableIds.push(t.id)
     g.partySize += t.seats
     groups.set(key, g)
+  }
+  for (const [key, g] of groups) {
+    if (g.name) continue
+    const first = layout.tables.find((t) => t.id === g.tableIds[0])
+    const names = g.tableIds.map((id) => layout.tables.find((t) => t.id === id)?.name ?? id)
+    g.name = key.startsWith('vip:') || first?.kind === 'vip' ? 'VIP' : `Big group ${names.length > 1 ? `${names[0]}–${names[names.length - 1]}` : names[0]}`
   }
   return [...groups.values()]
 }

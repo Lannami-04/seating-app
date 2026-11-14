@@ -80,7 +80,7 @@ const LAYOUT_COLUMNS =
   'id, name, width, height, created_at, updated_at, ' +
   'sections(id, name, color, position), ' +
   'features(id, kind, label, x, y, width, height, rotation, position), ' +
-  'tables(id, name, shape, kind, guest_name, x, y, rotation, seats, chair_kinds, highchairs, section_id, position)'
+  'tables(id, name, shape, kind, guest_name, x, y, rotation, seats, chair_kinds, highchairs, section_id, group_id, position)'
 
 interface LayoutRow {
   id: string
@@ -104,6 +104,7 @@ interface LayoutRow {
     chair_kinds: (ChairKind | null)[]
     highchairs: number
     section_id: string | null
+    group_id?: string | null
     position: number
   }[]
 }
@@ -133,6 +134,7 @@ function layoutFromRow(row: LayoutRow): RestaurantLayout {
       chairKinds: t.chair_kinds.map((k) => k ?? 'standard'),
       highchairs: t.highchairs,
       sectionId: t.section_id,
+      groupId: t.group_id ?? null,
     })),
   }
 }

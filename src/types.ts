@@ -127,6 +127,11 @@ export interface DesignTable {
   highchairs: number
   /** The section (e.g. "Hibiscus") this table belongs to, if any. */
   sectionId: string | null
+  /**
+   * Big group tables that were made into a group together share this id: during service they are ONE
+   * party (one reservation, one name across them, seated together). Null / missing for other tables.
+   */
+  groupId?: string | null
 }
 
 /** Things on the floor that are not tables. */

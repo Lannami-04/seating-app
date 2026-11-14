@@ -476,8 +476,9 @@ function EditorCanvas(props: EditorCanvasProps) {
     if (t.kind === 'regular') return null
     const text = t.guestName.trim() || (t.kind === 'vip' ? 'VIP' : '')
     if (!text) return null
-    // Big group tables with the same name share one name across their combined width.
-    return { text, color: TABLE_KINDS[t.kind].text, groupKey: t.kind === 'group' ? `group:${text.toLowerCase()}` : undefined }
+    // A big group's tables share one name across their combined width.
+    const groupKey = t.kind !== 'group' ? undefined : t.groupId ? `grp:${t.groupId}` : `group:${text.toLowerCase()}`
+    return { text, color: TABLE_KINDS[t.kind].text, groupKey }
   }, [])
   // The one selected room item shows stretch handles (not in many-select or section picking).
   const stretchTarget =

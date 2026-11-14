@@ -148,7 +148,9 @@ export function createLayout(name: string): RestaurantLayout {
 export function withAllTablesRegular(layout: RestaurantLayout): RestaurantLayout {
   return touchLayout({
     ...layout,
-    tables: layout.tables.map((t) => (t.kind === 'regular' && !t.guestName ? t : { ...t, kind: 'regular', guestName: '' })),
+    tables: layout.tables.map((t) =>
+      t.kind === 'regular' && !t.guestName && !t.groupId ? t : { ...t, kind: 'regular', guestName: '', groupId: null },
+    ),
   })
 }
 

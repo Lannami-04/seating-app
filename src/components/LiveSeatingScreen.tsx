@@ -119,7 +119,10 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
 
   const live = useMemo(() => toLiveLayout(layout), [layout])
   const tablesById = useMemo(() => new Map(live.tables.map((t) => [t.id, t])), [live])
-  const tableNames = (ids: string[]) => ids.map((id) => tablesById.get(id)?.name ?? id)
+  // Names in floor order (P1, P2, P3…), whatever order the ids come in.
+  const tableOrder = useMemo(() => new Map(live.tables.map((t, i) => [t.id, i])), [live])
+  const tableNames = (ids: string[]) =>
+    [...ids].sort((a, b) => (tableOrder.get(a) ?? 0) - (tableOrder.get(b) ?? 0)).map((id) => tablesById.get(id)?.name ?? id)
 
 
   // Escape closes the top-most layer (handy on desktop).
@@ -161,6 +164,8 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
         look.centerText = String(dt.seats)
       }
       look.checkedAt = shared.checks.get(t.id)
+      // Big group tables of one party: one name spanning them all.
+      if (status.reservation && dt?.kind === 'group') look.groupKey = `party:${status.reservation.id}`
       map.set(t.id, look)
     }
     return map

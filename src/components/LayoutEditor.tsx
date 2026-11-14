@@ -94,7 +94,25 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
   }
 
   function updateTable(id: string, changes: Partial<DesignTable>) {
-    save({ tables: layout.tables.map((t) => (t.id === id ? { ...t, ...changes } : t)) }, mergeKeyFor(id, changes))
+    const table = layout.tables.find((t) => t.id === id)
+    let extra: Partial<DesignTable> = {}
+    // Made a big group on its own: it starts its own group. Any other type: not in a group any more.
+    if (changes.kind !== undefined) extra = changes.kind === 'group' ? { groupId: table?.groupId ?? newId('G') } : { groupId: null }
+    // A big group is one party with one name: renaming one of its tables renames them all.
+    const groupId = table?.kind === 'group' ? table.groupId : null
+    const renameGroup = changes.guestName !== undefined && !!groupId
+    save(
+      {
+        tables: layout.tables.map((t) =>
+          t.id === id
+            ? { ...t, ...changes, ...extra }
+            : renameGroup && t.groupId === groupId
+              ? { ...t, guestName: changes.guestName as string }
+              : t,
+        ),
+      },
+      mergeKeyFor(id, changes),
+    )
   }
 
   function updateFeature(id: string, changes: Partial<DesignFeature>) {
@@ -191,6 +209,8 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
       chairKinds: [],
       highchairs: 0,
       sectionId: null,
+      // Big group tables added together are one group (one party during service).
+      groupId: choice.kind === 'group' ? newId('G') : null,
     }
     placeTables(template, choice.count, Math.round(centerRef.current.x), Math.round(centerRef.current.y), true)
   }
@@ -374,10 +394,13 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
   }
 
   function groupKind(kind: TableKind) {
+    // Selected tables made into a big group become ONE group: one party, one name, seated together.
+    const groupId = kind === 'group' ? newId('G') : null
+    const name = kind === 'group' ? (multiTables.map((t) => t.guestName.trim()).find(Boolean) ?? '') : null
     updateMultiTables((t) => {
       const r = seatRule(t.shape, kind)
       const seats = clamp(t.seats, r.min, r.max)
-      return { ...t, kind, seats, chairKinds: t.chairKinds.slice(0, seats) }
+      return { ...t, kind, seats, chairKinds: t.chairKinds.slice(0, seats), groupId, guestName: name ?? t.guestName }
     })
   }
 
@@ -411,7 +434,21 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
     const offset = findGroupCopyOffset(groupBoxes, otherBoxes, layout)
     if (!offset) return false
     const names = nextTableNames(layout.tables, multiTables.length)
-    const tableCopies = multiTables.map((t, i) => ({ ...t, id: newId('D'), name: names[i], x: t.x + offset.dx, y: t.y + offset.dy }))
+    // A copied big group is a new group of its own (not part of the original party).
+    const newGroupIds = new Map<string, string>()
+    const copyGroup = (g: string | null | undefined) => {
+      if (!g) return null
+      if (!newGroupIds.has(g)) newGroupIds.set(g, newId('G'))
+      return newGroupIds.get(g) as string
+    }
+    const tableCopies = multiTables.map((t, i) => ({
+      ...t,
+      id: newId('D'),
+      name: names[i],
+      x: t.x + offset.dx,
+      y: t.y + offset.dy,
+      groupId: copyGroup(t.groupId),
+    }))
     const featureCopies = multiFeatures.map((f) => ({ ...f, id: newId('F'), x: f.x + offset.dx, y: f.y + offset.dy }))
     save({ tables: [...layout.tables, ...tableCopies], features: [...layout.features, ...featureCopies] })
     setMulti(new Set([...tableCopies, ...featureCopies].map((c) => c.id)))
@@ -552,10 +589,20 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
             onSection={(sectionId) => updateMultiTables((t) => ({ ...t, sectionId }))}
             onNewSection={groupIntoNewSection}
             onKind={groupKind}
-            onName={(guestName) => save(
-              { tables: layout.tables.map((t) => (multi?.has(t.id) && t.kind !== 'regular' ? { ...t, guestName } : t)) },
-              'group-name', // typing a name is one undo step
-            )}
+            onName={(guestName) => {
+              // Whole big groups take the name, even tables of the group that aren't selected.
+              const groups = new Set(multiTables.filter((t) => t.kind === 'group' && t.groupId).map((t) => t.groupId))
+              save(
+                {
+                  tables: layout.tables.map((t) =>
+                    (multi?.has(t.id) && t.kind !== 'regular') || (t.kind === 'group' && t.groupId && groups.has(t.groupId))
+                      ? { ...t, guestName }
+                      : t,
+                  ),
+                },
+                'group-name', // typing a name is one undo step
+              )
+            }}
             onSeats={groupSeats}
             onTurn={groupTurn}
             onArrange={groupArrange}

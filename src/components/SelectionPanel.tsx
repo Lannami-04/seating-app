@@ -112,6 +112,12 @@ function SelectionPanel(props: SelectionPanelProps) {
               </button>
             ))}
           </div>
+          {sharedKind === 'group' && (
+            <p className="panel__hint">
+              Tapping Big group makes the selected tables ONE group: during service they are one party, with one
+              name across them, and seating any of them seats them all.
+            </p>
+          )}
           {named.length > 0 && (
             <label className="field">
               <span className="field__label">

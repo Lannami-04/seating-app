@@ -17,6 +17,8 @@ export interface LiveTableLook {
   chairFill: (index: number) => string
   /** When someone last checked this table against the real floor (ms), if ever: a small ✓ is shown. */
   checkedAt?: number
+  /** Tables with the same key share ONE name across their combined width (a big group's party). */
+  groupKey?: string
 }
 
 interface DesignTableShapeProps {

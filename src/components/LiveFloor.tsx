@@ -240,8 +240,8 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
       return {
         text: look.centerText,
         color: look.textColor === colors.white ? colors.ink : look.textColor,
-        // Big group tables with the same party share one name across their combined width.
-        groupKey: t.kind === 'group' ? `group:${look.centerText.toLowerCase()}` : undefined,
+        // A big group's party shares one name across its tables' combined width.
+        groupKey: look.groupKey,
       }
     },
     [looks],
