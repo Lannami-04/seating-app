@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Chair as ChairData, Family, Reservation, Table } from '../types'
 import type { TableStatus } from '../logic/seating'
-import { chairPositions, seatCount, tableBounds, tableSize } from '../logic/geometry'
+import { TABLE_SCALE, chairPositions, seatCount, tableBounds, tableSize } from '../logic/geometry'
 import { pickFamilyColor } from '../logic/familyColors'
 import { clockTime } from '../logic/clock'
 import { colors } from '../theme'
@@ -58,7 +58,7 @@ function closestFreeSeat(table: Table, owners: Map<string, Family>, family: Fami
   return (best as { id: string } | null)?.id ?? null
 }
 
-const CHAIR_RADIUS = 1.0
+const CHAIR_RADIUS = 1.0 * TABLE_SCALE
 const PADDING = 0.8
 
 /**

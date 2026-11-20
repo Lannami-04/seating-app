@@ -25,7 +25,7 @@ import {
 import { touchLayout } from '../state/layoutStorage'
 import { emptyHistory, nowMs, recordChange, redo, undo } from '../state/undoHistory'
 import EditorCanvas from './EditorCanvas'
-import type { CanvasTarget, Move } from './EditorCanvas'
+import type { CanvasTarget, Move, ScaleChange } from './EditorCanvas'
 import NewTableDialog from './NewTableDialog'
 import type { NewTableChoice } from './NewTableDialog'
 import TablePanel from './TablePanel'
@@ -347,6 +347,28 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
     save({ tables: layout.tables.map(place), features: layout.features.map(place) })
   }
 
+  /** Everything selected was made bigger / smaller: new spots (and room item sizes), as one undo step. */
+  function applyScale(changes: ScaleChange[]) {
+    const byId = new Map(changes.map((c) => [c.id, c]))
+    save({
+      tables: layout.tables.map((t) => {
+        const c = byId.get(t.id)
+        return c ? { ...t, x: c.x, y: c.y } : t
+      }),
+      features: layout.features.map((f) => {
+        const c = byId.get(f.id)
+        return c ? { ...f, x: c.x, y: c.y, width: c.width ?? f.width, height: c.height ?? f.height } : f
+      }),
+    })
+  }
+
+  /** Selects every table and room item on the floor. */
+  function selectAll() {
+    setPicking(null)
+    setSelection(null)
+    setMulti(new Set([...layout.tables, ...layout.features].map((i) => i.id)))
+  }
+
   // ---------- Deleting ----------
 
   /**
@@ -533,6 +555,9 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
               >
                 {multi ? 'Stop selecting' : 'Select many'}
               </button>
+              <button className="btn" onClick={selectAll} disabled={layout.tables.length + layout.features.length < 2}>
+                Select all
+              </button>
             </div>
             <div className="topbar__actions">
               <span className="editor__add-label">Room</span>
@@ -566,6 +591,7 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
           onBoxSelect={handleBoxSelect}
           onMove={applyMoves}
           onResize={(id, change) => updateFeature(id, change)}
+          onScale={applyScale}
           centerRef={centerRef}
           topLeft={
             <>

@@ -1080,6 +1080,10 @@ select.input {
   cursor: ns-resize;
 }
 
+.scale-handle {
+  cursor: nwse-resize;
+}
+
 /* "Sections" on/off switch above the zoom buttons. */
 .zoom {
   align-items: flex-end;

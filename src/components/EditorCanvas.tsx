@@ -23,6 +23,58 @@ export interface Move {
   y: number
 }
 
+/** New spot (and, for room items, new size) after the whole selection was made bigger or smaller. */
+export interface ScaleChange {
+  id: string
+  x: number
+  y: number
+  width?: number
+  height?: number
+}
+
+/** Many selected things, measured by their centers: grows / shrinks away from `anchor` (top-left). */
+interface ScaleFrame {
+  anchor: Point
+  corner: Point
+  tables: RestaurantLayout['tables']
+  features: DesignFeature[]
+  /** Largest factor that keeps every center on the floor. */
+  maxFactor: number
+}
+
+const MIN_FACTOR = 0.2
+/** Room around the centers so the dashed frame goes around the tables, not through them. */
+const FRAME_PAD = 4
+
+function scaleFrame(layout: RestaurantLayout, ids: Set<string>): ScaleFrame | null {
+  const tables = layout.tables.filter((t) => ids.has(t.id))
+  const features = layout.features.filter((f) => ids.has(f.id))
+  const all = [...tables, ...features]
+  if (all.length < 2) return null
+  const anchor = { x: Math.min(...all.map((i) => i.x)), y: Math.min(...all.map((i) => i.y)) }
+  const corner = { x: Math.max(...all.map((i) => i.x)), y: Math.max(...all.map((i) => i.y)) }
+  if (Math.hypot(corner.x - anchor.x, corner.y - anchor.y) < 1) return null
+  const limits = [10]
+  if (corner.x > anchor.x) limits.push((layout.width - 1 - anchor.x) / (corner.x - anchor.x))
+  if (corner.y > anchor.y) limits.push((layout.height - 1 - anchor.y) / (corner.y - anchor.y))
+  return { anchor, corner, tables, features, maxFactor: Math.max(MIN_FACTOR, Math.min(...limits)) }
+}
+
+const round1 = (v: number) => Math.round(v * 10) / 10
+
+/** Where an item ends up when the frame is scaled by `s` (room items also change size; divider thickness stays). */
+function scaledItem<T extends { x: number; y: number }>(item: T, frame: ScaleFrame, s: number): T {
+  return { ...item, x: round1(frame.anchor.x + (item.x - frame.anchor.x) * s), y: round1(frame.anchor.y + (item.y - frame.anchor.y) * s) }
+}
+
+function scaledFeature(f: DesignFeature, frame: ScaleFrame, s: number): DesignFeature {
+  return {
+    ...scaledItem(f, frame, s),
+    width: Math.max(2, round1(f.width * s)),
+    height: f.kind === 'divider' ? f.height : Math.max(1, round1(f.height * s)),
+  }
+}
+
 interface EditorCanvasProps {
   layout: RestaurantLayout
   /** The one thing being edited in the side panel. */
@@ -43,6 +95,8 @@ interface EditorCanvasProps {
   onMove: (moves: Move[]) => void
   /** A room item was stretched with its handles: new center and size. */
   onResize: (id: string, change: Pick<DesignFeature, 'x' | 'y' | 'width' | 'height'>) => void
+  /** Everything selected was made bigger or smaller with the corner handle. */
+  onScale: (changes: ScaleChange[]) => void
   /** Floating buttons drawn in the top-left corner of the floor (undo / redo). */
   topLeft?: ReactNode
   /** Kept up to date with the floor point in the middle of the screen, for placing new tables. */
@@ -70,6 +124,8 @@ interface Gesture {
   boxStart: Point | null
   /** Stretching a room item by one of its handles. */
   resizing: Handle | null
+  /** Making the whole selection bigger / smaller: where the finger started (floor units). */
+  scaleStart?: Point | null
 }
 
 /** A stretch handle: which room item, along its length ('w') or depth ('h'), and which end (+1 / -1). */
@@ -243,7 +299,8 @@ function StretchHandles({ feature, scale }: { feature: DesignFeature; scale: num
  * - Hold on a table to start selecting many. Hold on empty floor, then drag, to select an area.
  */
 function EditorCanvas(props: EditorCanvasProps) {
-  const { layout, selection, multiIds, pickedIds, hiddenSectionId, onTap, onLongPress, onBoxSelect, onMove, onResize, topLeft, centerRef } = props
+  const { layout, selection, multiIds, pickedIds, hiddenSectionId, onTap, onLongPress, onBoxSelect, onMove, onResize, onScale, topLeft, centerRef } =
+    props
   const surfaceRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [userView, setUserView] = useState<View | null>(null) // null = fit the whole floor
@@ -252,6 +309,9 @@ function EditorCanvas(props: EditorCanvasProps) {
   const [box, setBox] = useState<Box | null>(null)
   // While stretching: the room item's new center and size.
   const [resize, setResize] = useState<{ id: string; x: number; y: number; width: number; height: number } | null>(null)
+  // While scaling the selection: the factor so far (1 = unchanged).
+  const [factor, setFactor] = useState<number | null>(null)
+  const frame = useMemo(() => (multiIds && !pickedIds ? scaleFrame(layout, multiIds) : null), [layout, multiIds, pickedIds])
   const pointers = useRef(new Map<number, Point>())
   const gesture = useRef<Gesture | null>(null)
   const pressTimer = useRef<number | null>(null)
@@ -350,6 +410,22 @@ function EditorCanvas(props: EditorCanvasProps) {
       return
     }
 
+    // The corner handle of a many-selection: make everything bigger / smaller.
+    if (frame && e.target instanceof Element && e.target.closest('[data-scale-handle]')) {
+      gesture.current = {
+        view,
+        points,
+        moved: false,
+        longPressed: false,
+        target: null,
+        dragging: null,
+        boxStart: null,
+        resizing: null,
+        scaleStart: toFloor(points[0], view),
+      }
+      return
+    }
+
     // A stretch handle on the selected room item wins over everything else.
     const handle = pickedIds ? null : handleAt(e.target)
     if (handle) {
@@ -402,7 +478,15 @@ function EditorCanvas(props: EditorCanvasProps) {
       if (!g.moved) gesture.current = { ...g, moved: true }
       const p = toFloor(points[0], view)
 
-      if (g.resizing) {
+      if (g.scaleStart && frame) {
+        // Where the corner would be now, measured along the frame's diagonal.
+        const ux = frame.corner.x - frame.anchor.x
+        const uy = frame.corner.y - frame.anchor.y
+        const cx = ux + p.x - g.scaleStart.x
+        const cy = uy + p.y - g.scaleStart.y
+        const s = (cx * ux + cy * uy) / (ux * ux + uy * uy)
+        setFactor(Math.round(clamp(s, MIN_FACTOR, frame.maxFactor) * 100) / 100)
+      } else if (g.resizing) {
         const handle = g.resizing
         const f = layout.features.find((i) => i.id === handle.id)
         if (f) setResize({ id: f.id, ...stretch(f, handle, p, layout, 44 / view.scale) })
@@ -437,7 +521,20 @@ function EditorCanvas(props: EditorCanvasProps) {
     pointers.current.delete(e.pointerId)
 
     if (g && single && e.type === 'pointerup') {
-      if (g.resizing && resize) {
+      if (g.scaleStart) {
+        if (frame && factor !== null && factor !== 1) {
+          onScale([
+            ...frame.tables.map((t) => {
+              const n = scaledItem(t, frame, factor)
+              return { id: t.id, x: n.x, y: n.y }
+            }),
+            ...frame.features.map((f) => {
+              const n = scaledFeature(f, frame, factor)
+              return { id: f.id, x: n.x, y: n.y, width: n.width, height: n.height }
+            }),
+          ])
+        }
+      } else if (g.resizing && resize) {
         onResize(resize.id, { x: resize.x, y: resize.y, width: resize.width, height: resize.height })
       } else if (g.boxStart && box) {
         const inside = (p: { x: number; y: number }) => p.x >= box.minX && p.x <= box.maxX && p.y >= box.minY && p.y <= box.maxY
@@ -451,6 +548,7 @@ function EditorCanvas(props: EditorCanvasProps) {
     setDrag(null)
     setBox(null)
     setResize(null)
+    setFactor(null)
 
     if (pointers.current.size > 0) {
       gesture.current = { view, points: [...pointers.current.values()], moved: true, longPressed: false, target: null, dragging: null, boxStart: null, resizing: null }
@@ -459,9 +557,28 @@ function EditorCanvas(props: EditorCanvasProps) {
 
   const zoomButtons = (factor: number) => setUserView(zoomAt(view, factor, size.width / 2, size.height / 2, minScale, maxScale))
 
-  const live = <T extends { id: string; x: number; y: number }>(item: T): T =>
-    drag?.ids.has(item.id) ? { ...item, x: item.x + drag.dx, y: item.y + drag.dy } : item
+  const scalingNow = frame && factor !== null && multiIds ? { frame, s: factor, ids: multiIds } : null
+  const live = <T extends { id: string; x: number; y: number }>(item: T): T => {
+    if (scalingNow?.ids.has(item.id)) return scaledItem(item, scalingNow.frame, scalingNow.s)
+    return drag?.ids.has(item.id) ? { ...item, x: item.x + drag.dx, y: item.y + drag.dy } : item
+  }
+  const liveFeature = (f: DesignFeature): DesignFeature =>
+    scalingNow?.ids.has(f.id) ? scaledFeature(f, scalingNow.frame, scalingNow.s) : live(f)
   const tables = layout.tables.map(live)
+
+  // The dashed frame around a many-selection, with its corner handle (follows a drag or a scale in progress).
+  const frameBox = (() => {
+    if (!frame) return null
+    const s = factor ?? 1
+    const dx = drag?.dx ?? 0
+    const dy = drag?.dy ?? 0
+    return {
+      minX: frame.anchor.x + dx - FRAME_PAD,
+      minY: frame.anchor.y + dy - FRAME_PAD,
+      maxX: frame.anchor.x + (frame.corner.x - frame.anchor.x) * s + dx + FRAME_PAD,
+      maxY: frame.anchor.y + (frame.corner.y - frame.anchor.y) * s + dy + FRAME_PAD,
+    }
+  })()
   const zoomedIn = view.scale >= SHOW_CHAIRS_SCALE
   const isSelected = (kind: CanvasTarget['kind'], id: string) =>
     multiIds ? multiIds.has(id) : selection?.kind === kind && selection.id === id
@@ -531,7 +648,7 @@ function EditorCanvas(props: EditorCanvasProps) {
               {layout.features.map((f) => (
                 <g key={f.id} data-item-kind="feature" data-item-id={f.id} className="editor__item" opacity={pickedIds ? 0.5 : 1}>
                   <DesignFeatureShape
-                    feature={resize?.id === f.id ? { ...f, ...resize } : live(f)}
+                    feature={resize?.id === f.id ? { ...f, ...resize } : liveFeature(f)}
                     selected={isSelected('feature', f.id)}
                     scale={view.scale}
                   />
@@ -561,6 +678,44 @@ function EditorCanvas(props: EditorCanvasProps) {
 
               {stretchTarget && (
                 <StretchHandles feature={resize?.id === stretchTarget.id ? { ...stretchTarget, ...resize } : stretchTarget} scale={view.scale} />
+              )}
+
+              {frameBox && (
+                <g>
+                  <rect
+                    x={frameBox.minX}
+                    y={frameBox.minY}
+                    width={frameBox.maxX - frameBox.minX}
+                    height={frameBox.maxY - frameBox.minY}
+                    fill="none"
+                    stroke={colors.selection}
+                    strokeWidth={1.5 / view.scale}
+                    strokeDasharray={`${6 / view.scale} ${4 / view.scale}`}
+                    pointerEvents="none"
+                  />
+                  <g data-scale-handle="1" className="scale-handle">
+                    <circle cx={frameBox.maxX} cy={frameBox.maxY} r={22 / view.scale} fill="transparent" />
+                    <circle cx={frameBox.maxX} cy={frameBox.maxY} r={12 / view.scale} fill={colors.white} stroke={colors.selection} strokeWidth={3 / view.scale} />
+                    {/* Diagonal two-way arrow: "bigger / smaller". */}
+                    <path
+                      d={`M ${frameBox.maxX - 6 / view.scale} ${frameBox.maxY - 6 / view.scale} L ${frameBox.maxX + 6 / view.scale} ${frameBox.maxY + 6 / view.scale}`}
+                      stroke={colors.selection}
+                      strokeWidth={2.5 / view.scale}
+                      strokeLinecap="round"
+                    />
+                  </g>
+                  <text
+                    x={frameBox.maxX}
+                    y={frameBox.maxY + 30 / view.scale}
+                    textAnchor="middle"
+                    fontSize={13 / view.scale}
+                    fontWeight={700}
+                    fill={colors.selection}
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {factor === null ? 'Drag to resize all' : `${Math.round(factor * 100)}%`}
+                  </text>
+                </g>
               )}
 
               {box && (

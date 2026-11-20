@@ -61,6 +61,13 @@ function SelectionPanel(props: SelectionPanelProps) {
         {count === 0 ? 'Tap tables to select them.' : parts.join(' · ')}
         <br />
         Tap to add or remove · hold empty floor and drag to select an area · drag any selected table to move them all.
+        {count > 1 && (
+          <>
+            <br />
+            <strong>Bigger or smaller:</strong> drag the round handle at the bottom-right corner of the dashed box. Everything
+            spreads out or moves closer together. Tables keep their real size, while stage, bar and dividers resize along.
+          </>
+        )}
       </p>
 
       {hasTables && (

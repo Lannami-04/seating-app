@@ -8,16 +8,22 @@ export interface Point {
   y: number
 }
 
+/**
+ * How big tables and chairs are drawn, everywhere (1 = the original size).
+ * Bigger is easier to see and to tap on a tablet; tables placed close together may then touch.
+ */
+export const TABLE_SCALE = 1.2
+
 /** Distance from the table edge to the center of each chair. */
-export const CHAIR_OFFSET = 1.3
+export const CHAIR_OFFSET = 1.3 * TABLE_SCALE
 /** Space between neighbouring chairs along a rectangle's long side. */
-const CHAIR_SPACING = 2.4
-const RECT_WIDTH = 3
+const CHAIR_SPACING = 2.4 * TABLE_SCALE
+const RECT_WIDTH = 3 * TABLE_SCALE
 
 const ROUND_RADIUS: Record<number, number> = { 8: 3, 10: 3.5, 12: 4 }
 
 export function roundRadius(seats: number): number {
-  return ROUND_RADIUS[seats] ?? Math.max(2, seats * 0.35)
+  return (ROUND_RADIUS[seats] ?? Math.max(2, seats * 0.35)) * TABLE_SCALE
 }
 
 /** Width and height of the table top itself (not including chairs). */
@@ -33,7 +39,7 @@ export function tableSize(table: Table): { width: number; height: number } {
     return { width: d, height: d }
   }
   if (table.shape === 'square') {
-    const side = seats <= 2 ? 2.5 : 3
+    const side = (seats <= 2 ? 2.5 : 3) * TABLE_SCALE
     return { width: side, height: side }
   }
   const perSide = Math.max(1, (seats - 2) / 2)
@@ -58,7 +64,7 @@ export function chairPositions(table: Table): Point[] {
     let my = (a.y + b.y) / 2
     const len = Math.hypot(mx, my)
     // Far enough out that it clears both neighbours, even with the big chairs in the table close-up.
-    const reach = Math.max(Math.hypot(a.x, a.y), Math.hypot(b.x, b.y)) + 1.7
+    const reach = Math.max(Math.hypot(a.x, a.y), Math.hypot(b.x, b.y)) + 1.7 * TABLE_SCALE
     if (len < 0.01) {
       // Two chairs facing each other: put the highchair at the top instead.
       mx = 0

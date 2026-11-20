@@ -1,7 +1,7 @@
 // Rules for things the user places on their own canvas. Plain functions, no UI.
 
 import type { ChairKind, DesignFeature, DesignTable, FeatureKind, RestaurantLayout, Table, TableKind, TableShape } from '../types'
-import { tableBounds } from './geometry'
+import { TABLE_SCALE, tableBounds } from './geometry'
 
 /** Allowed seat counts per shape. Long tables grow two seats at a time (one each side). */
 export const SEAT_RULES: Record<TableShape, { min: number; max: number; step: number; start: number; label: string }> = {
@@ -117,7 +117,7 @@ function hslToHex(h: number, s: number, l: number): string {
 }
 
 /** Radius of a chair dot on the design canvas. */
-export const DESIGN_CHAIR_RADIUS = 0.8
+export const DESIGN_CHAIR_RADIUS = 0.8 * TABLE_SCALE
 
 /** Turn steps offered in the editor, in degrees. */
 export const ROTATE_STEP = 15
