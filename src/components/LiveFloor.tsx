@@ -14,7 +14,6 @@ import SectionLabels from './SectionLabels'
 import TableNameLabels from './TableNameLabels'
 import type { TableName } from './TableNameLabels'
 import ZoomControls from './ZoomControls'
-import FloorLegend from './FloorLegend'
 
 interface LiveFloorProps {
   layout: RestaurantLayout
@@ -48,16 +47,18 @@ const DOUBLE_TAP_MS = 280
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 const midpoint = (a: Point, b: Point) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 
-/** Room kept free at the bottom of the "whole floor" view for the floating color key, in screen pixels. */
-const KEY_ROOM = 56
+/** Small gap kept around the tables in the "whole floor" view, in screen pixels. */
+const FIT_MARGIN = 12
 
-/** View that fills the screen with `box` (the used part of the floor), centered, leaving `bottomRoom` px free. */
-function fitView(width: number, height: number, box: Box, bottomRoom = 0): View {
-  const usable = Math.max(1, height - bottomRoom)
+/**
+ * View where `box` (the tables and room items, not the empty floor) is as big as the screen allows,
+ * centered, with a small margin on every side.
+ */
+function fitView(width: number, height: number, box: Box): View {
   const bw = Math.max(1, box.maxX - box.minX)
   const bh = Math.max(1, box.maxY - box.minY)
-  const scale = Math.min(width / bw, usable / bh) * 0.98
-  return { scale, x: (width - bw * scale) / 2 - box.minX * scale, y: (usable - bh * scale) / 2 - box.minY * scale }
+  const scale = Math.max(0.01, Math.min((width - 2 * FIT_MARGIN) / bw, (height - 2 * FIT_MARGIN) / bh))
+  return { scale, x: (width - bw * scale) / 2 - box.minX * scale, y: (height - bh * scale) / 2 - box.minY * scale }
 }
 
 /** Zoom by `factor`, keeping the point (cx, cy) under the finger/mouse still. */
@@ -101,8 +102,26 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
     return () => observer.disconnect()
   }, [])
 
-  // "Whole layout" view: the used part of the floor fills the screen, with room left for the floating key.
-  const fit = useMemo(() => fitView(size.width, size.height, contentBox(layout), KEY_ROOM), [size, layout])
+  // Turning the tablet or resizing the window: show the whole layout again, fitted to the new shape.
+  // Only when the width changes: the iPad keyboard opening (height only) shouldn't undo the hostess's zoom.
+  useEffect(() => {
+    let lastWidth = window.innerWidth
+    const refit = (e: Event) => {
+      if (e.type === 'resize' && window.innerWidth === lastWidth) return
+      lastWidth = window.innerWidth
+      setUserView(null)
+    }
+    window.addEventListener('resize', refit)
+    window.addEventListener('orientationchange', refit)
+    return () => {
+      window.removeEventListener('resize', refit)
+      window.removeEventListener('orientationchange', refit)
+    }
+  }, [])
+
+  // "Whole layout" view: the tables and room items fill the whole area, with a small margin.
+  // (Recomputed whenever the floor area changes size, so it always fits while not zoomed by hand.)
+  const fit = useMemo(() => fitView(size.width, size.height, contentBox(layout)), [size, layout])
   const view = userView ?? fit
   // Can always zoom out far enough to see the entire floor, even though the fit view zooms to the tables.
   const minScale = Math.min(fit.scale, Math.min(size.width / layout.width, size.height / layout.height)) * 0.8
@@ -312,9 +331,6 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
           </svg>
         )}
       </div>
-
-      {/* Floating color key, bottom left. The whole-floor view keeps space for it, so it doesn't cover tables. */}
-      <FloorLegend />
 
       <ZoomControls
         onZoomIn={() => zoomButtons(1.5)}

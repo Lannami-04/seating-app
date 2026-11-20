@@ -203,17 +203,14 @@
 }
 
 
+/* Color key in the strip under the live header (off the floor, so it never covers tables). */
 .floor-legend {
-  position: absolute;
-  left: 16px;
-  bottom: max(16px, env(safe-area-inset-bottom));
   display: flex;
-  gap: 16px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--border);
+  align-items: center;
+  gap: 12px;
   font-size: 14px;
+  color: var(--ink-muted);
+  white-space: nowrap;
   pointer-events: none;
 }
 

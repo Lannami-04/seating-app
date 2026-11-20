@@ -11,6 +11,7 @@ import { nowMs } from '../state/undoHistory'
 import { colors } from '../theme'
 import type { LiveTableLook } from './DesignTableShape'
 import LiveFloor from './LiveFloor'
+import FloorLegend from './FloorLegend'
 import SeatCounter from './SeatCounter'
 import TableDetail from './TableDetail'
 import ReservationBar from './ReservationBar'
@@ -392,6 +393,8 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
           <div className={reserving || moving ? 'live__strip-slot live__strip-slot--hidden' : 'live__strip-slot'} aria-hidden={!!(reserving || moving)}>
             <PartySizeBar size={partySize} onPick={setPartySize} note={suggestionNote} />
           </div>
+          {/* Color key up here (not floating on the floor), so the floor can use the whole area below. */}
+          <FloorLegend />
           <button
             className={`btn btn--ghost recent-btn${unseen > 0 ? ' recent-btn--new' : ''}`}
             onClick={() => setShowRecent((v) => !v)}
