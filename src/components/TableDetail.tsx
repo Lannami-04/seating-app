@@ -36,6 +36,8 @@ interface TableDetailProps {
   moving?: Family
   /** "Checked": someone looked at this table on the real floor and it matches. */
   onCheck: () => void
+  /** Take the "Checked" mark away again (it was pressed by mistake). */
+  onUncheck: () => void
   /** When the table was last checked (ms), if ever this event. */
   checkedAt?: number
 }
@@ -174,14 +176,25 @@ function TableDetail(props: TableDetailProps) {
           <div className="detail__subtitle">{subtitle}</div>
         </div>
         <div className="detail__header-actions">
-          <button
-            className="btn detail__check"
-            onClick={props.onCheck}
-            disabled={props.busy}
-            title="Tap after looking at this table on the floor: it matches what the app shows"
-          >
-            ✓ Checked
-          </button>
+          {props.checkedAt ? (
+            <button
+              className="btn detail__check detail__check--on"
+              onClick={props.onUncheck}
+              disabled={props.busy}
+              title="Checked by mistake? Tap to take the check mark away"
+            >
+              ✓ Checked · Undo
+            </button>
+          ) : (
+            <button
+              className="btn detail__check"
+              onClick={props.onCheck}
+              disabled={props.busy}
+              title="Tap after looking at this table on the floor: it matches what the app shows"
+            >
+              ✓ Checked
+            </button>
+          )}
           <button className="btn btn--quiet-danger" onClick={props.onClearTable} disabled={!canClear || !!moving}>
             Clear table
           </button>

@@ -40,7 +40,7 @@ interface ConfirmRequest {
 }
 
 /** Colors and middle text of one table during service. */
-function liveLook(status: TableStatus, owners: Map<string, Family>, chairIds: string[]): LiveTableLook {
+function liveLook(status: TableStatus, owners: Map<string, Family>, chairIds: string[], seatTotal: number): LiveTableLook {
   const r = status.reservation
   if (r) {
     const seated = r.status === 'seated'
@@ -61,7 +61,19 @@ function liveLook(status: TableStatus, owners: Map<string, Family>, chairIds: st
     dashed: false,
     centerText: status.isFull ? '' : String(status.remaining),
     chairFill: (i) => owners.get(chairIds[i])?.color ?? colors.chairFree,
+    halo: fullnessHalo(status, seatTotal),
   }
+}
+
+/**
+ * Glow around a table by how full it is: gray = nobody yet, red = only 1–2 seats left,
+ * yellow = some guests. Full tables need no glow (the table itself turns green).
+ */
+function fullnessHalo(status: TableStatus, seatTotal: number): string | undefined {
+  if (status.isFull) return undefined
+  if (status.remaining >= seatTotal) return colors.haloEmpty
+  if (status.remaining <= 2) return colors.haloAlmost
+  return colors.haloSome
 }
 
 /**
@@ -158,7 +170,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
     for (const t of live.tables) {
       const status = statuses.get(t.id)
       if (!status) continue
-      const look = liveLook(status, owners, t.chairs.map((c) => c.id))
+      const look = liveLook(status, owners, t.chairs.map((c) => c.id), t.chairs.filter((c) => c.kind !== 'highchair').length)
       // A held big group with no name: show its seat count (like the editor does), not "Big group T5".
       const dt = designed.get(t.id)
       if (status.reservation?.held && status.reservation.status !== 'seated' && dt?.kind === 'group' && !dt.guestName.trim()) {
@@ -463,6 +475,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
           moving={moving ?? undefined}
           checkedAt={shared.checks.get(openTable.id)}
           onCheck={() => void perform({ type: 'checkTable', tableId: openTable.id })}
+          onUncheck={() => void perform({ type: 'uncheckTable', tableId: openTable.id })}
           onMoveFamily={(family) => {
             setOpenTableId(null)
             setPartySize(null)

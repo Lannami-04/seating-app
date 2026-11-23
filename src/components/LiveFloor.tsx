@@ -2,14 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import type { RestaurantLayout } from '../types'
 import type { Point } from '../logic/geometry'
-import { DESIGN_CHAIR_RADIUS, clamp, contentBox, designTableBox } from '../logic/designTables'
+import { tableBounds } from '../logic/geometry'
+import { DESIGN_CHAIR_RADIUS, clamp, contentBox, designTableBox, toTable } from '../logic/designTables'
 import type { Box } from '../logic/designTables'
 import { colors } from '../theme'
 import { loadShowSections, saveShowSections } from '../state/viewPrefs'
 import DesignTableShape from './DesignTableShape'
 import type { LiveTableLook } from './DesignTableShape'
 import DesignFeatureShape from './DesignFeatureShape'
-import SectionOutline from './SectionOutline'
 import SectionLabels from './SectionLabels'
 import TableNameLabels from './TableNameLabels'
 import type { TableName } from './TableNameLabels'
@@ -66,6 +66,36 @@ function zoomAt(base: View, factor: number, cx: number, cy: number, minScale: nu
   const scale = clamp(base.scale * factor, minScale, maxScale)
   const k = scale / base.scale
   return { scale, x: cx - (cx - base.x) * k, y: cy - (cy - base.y) * k }
+}
+
+/** How far a fullness glow reaches past the table's chairs, in layout units. */
+const HALO = 1.6
+
+/** Soft glow behind each table in its fullness color (gray / yellow / red); none for full or reserved tables. */
+function TableHalos({ tables, looks }: { tables: RestaurantLayout['tables']; looks: Map<string, LiveTableLook> }) {
+  return (
+    <g opacity={0.45} pointerEvents="none">
+      {tables.map((t) => {
+        const color = looks.get(t.id)?.halo
+        if (!color) return null
+        const b = tableBounds(toTable({ ...t, x: 0, y: 0 }), DESIGN_CHAIR_RADIUS)
+        const w = b.width + HALO * 2
+        const h = b.height + HALO * 2
+        return (
+          <rect
+            key={t.id}
+            transform={`translate(${t.x} ${t.y}) rotate(${t.rotation})`}
+            x={b.minX - HALO}
+            y={b.minY - HALO}
+            width={w}
+            height={h}
+            rx={Math.min(w, h) / 2}
+            fill={color}
+          />
+        )
+      })}
+    </g>
+  )
 }
 
 /** Soft, slowly pulsing glow behind the suggested table. */
@@ -281,10 +311,8 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
             <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
               <rect width={layout.width} height={layout.height} rx={1} fill={colors.ground} stroke={colors.groundStroke} strokeWidth={0.3} />
 
-              {showSections &&
-                layout.sections.map((s) => (
-                  <SectionOutline key={s.id} section={s} tables={layout.tables.filter((t) => t.sectionId === s.id)} />
-                ))}
+              {/* How full each table is: a soft glow behind it (the section shows only as its name). */}
+              <TableHalos tables={layout.tables} looks={looks} />
 
               {layout.features.map((f) => (
                 <DesignFeatureShape key={f.id} feature={f} scale={view.scale} />

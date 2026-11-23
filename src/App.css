@@ -235,6 +235,20 @@
   border: 1px solid #9aa3ad;
 }
 
+/* Same soft glow as around a table, with a gray table-top dot in the middle. */
+.floor-legend__swatch--glow {
+  position: relative;
+}
+
+.floor-legend__swatch--glow::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: #d9dde2;
+  border: 1px solid #9aa3ad;
+}
+
 .floor-legend__swatch--full {
   background: var(--green);
 }
@@ -1296,6 +1310,12 @@ select.input {
 .detail__check {
   color: #2f7a52;
   border-color: #b9d6c5;
+}
+
+/* Already checked: filled, and tapping it takes the mark away. */
+.detail__check--on {
+  background: #e4f2ea;
+  border-color: #3d8b5f;
 }
 
 /* Header while moving a family: "Moving family F7 (4) from P1: tap a table…  [Cancel]". */

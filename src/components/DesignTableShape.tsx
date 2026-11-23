@@ -19,6 +19,8 @@ export interface LiveTableLook {
   checkedAt?: number
   /** Tables with the same key share ONE name across their combined width (a big group's party). */
   groupKey?: string
+  /** Soft glow around the table showing how full it is (none when full or reserved). */
+  halo?: string
 }
 
 interface DesignTableShapeProps {

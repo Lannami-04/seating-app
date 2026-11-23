@@ -232,6 +232,8 @@ export type LiveAction =
   /** To other chairs at the same table, or to another table. */
   | { type: 'moveFamily'; familyId: string; tableId: string; chairIds: string[] }
   | { type: 'checkTable'; tableId: string }
+  /** Takes a "Checked" mark away again (pressed on the wrong table). */
+  | { type: 'uncheckTable'; tableId: string }
   | { type: 'markFamilyDone'; familyId: string }
   | { type: 'removeFamily'; familyId: string }
   | { type: 'createReservation'; name: string; partySize: number; tableIds: string[] }
@@ -270,6 +272,17 @@ export async function runLiveAction(eventId: string, action: LiveAction, current
     case 'checkTable':
       unwrap(await db().rpc('check_table', { p_event, p_table: action.tableId }))
       return null
+    case 'uncheckTable': {
+      const result = await db().rpc('uncheck_table', { p_event, p_table: action.tableId })
+      // Database not updated yet (file …_uncheck_table.sql not run): remove the mark directly instead.
+      // Other tablets then only see it gone after the next seating change.
+      if (result.error && (result.error as { code?: string }).code === 'PGRST202') {
+        unwrap(await db().from('table_checks').delete().eq('event_id', p_event).eq('table_id', action.tableId))
+        return null
+      }
+      unwrap(result)
+      return null
+    }
     case 'markFamilyDone':
       unwrap(await db().rpc('finish_family', { p_event, p_family: action.familyId }))
       return null

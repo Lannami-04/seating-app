@@ -14,5 +14,9 @@ export const colors = {
   chairFree: '#C3C9D0',
   chairReserved: '#E9D8A6',
   selection: '#E07A00',
+  // Live seating: glow around a table by how full it is.
+  haloEmpty: '#8F99A4',
+  haloSome: '#F2C230',
+  haloAlmost: '#E5484D',
   white: '#FFFFFF',
 }
