@@ -30,6 +30,11 @@ export interface Table {
   x: number
   y: number
   chairs: Chair[]
+  /**
+   * How many seats the table top is drawn for, when that's more than its chairs
+   * (a long table for 8 that has exactly 7 chairs keeps its size and shows one gap).
+   */
+  size?: number
 }
 
 export interface Section {
@@ -120,7 +125,14 @@ export interface DesignTable {
   y: number
   /** Turn angle in degrees, clockwise (0 = as first placed, 90 = standing vertical). */
   rotation: number
+  /** Chairs at the table right now. VIP / big group tables can be set to an exact number, odd numbers too. */
   seats: number
+  /**
+   * The table's usual seat count, remembered while a VIP / big group table has an exact number of chairs
+   * (e.g. 8 when it was cut down to 7), so "Restore normal size" can put the chairs back.
+   * Null / missing = the table has its usual seats.
+   */
+  normalSeats?: number | null
   /** Wheelchair spots by position: chairKinds[0] is seat 1. Missing entries are standard chairs. */
   chairKinds: ChairKind[]
   /** Extra highchairs added beside the table. They don't use up any of its seats. */

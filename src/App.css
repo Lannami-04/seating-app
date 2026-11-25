@@ -824,6 +824,22 @@
   font-size: 14px;
 }
 
+/* Typing an exact number of chairs for a VIP / big group table. */
+.exact-seats__input {
+  width: 76px;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.exact-seats__problem {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .panel__row {
   display: flex;
   align-items: center;

@@ -20,7 +20,11 @@ import {
   normalizeAngle,
   seatRule,
   spaceEvenly,
+  splitGroupSeats,
   totalSeats,
+  withExactSeats,
+  withKind,
+  withNormalSeats,
 } from '../logic/designTables'
 import { touchLayout } from '../state/layoutStorage'
 import { emptyHistory, nowMs, recordChange, redo, undo } from '../state/undoHistory'
@@ -60,7 +64,8 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
   // Many-select mode: ids of every selected table / room item. null = normal (one thing at a time).
   const [multi, setMulti] = useState<Set<string> | null>(null)
   // Short message at the bottom, e.g. "Deleted 5 tables", with an Undo button.
-  const [toast, setToast] = useState<{ text: string; at: number } | null>(null)
+  // A change that wasn't made (e.g. removing chairs where guests sit) shows its message here too, without Undo.
+  const [toast, setToast] = useState<{ text: string; at: number; refused?: boolean } | null>(null)
   // Waiting for "yes" before deleting tables that have guests seated during service.
   const [pendingDelete, setPendingDelete] = useState<Set<string> | null>(null)
   const [history, setHistory] = useState(emptyHistory)
@@ -82,8 +87,33 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
    * Pass a mergeKey for edits that come in a stream (typing a name, sliding the angle) so they undo as one step.
    */
   function save(changes: Partial<RestaurantLayout>, mergeKey: string | null = null) {
+    if (changes.tables && refuseIfGuestsLoseChairs(changes.tables)) return
     setHistory((h) => recordChange(h, layout, mergeKey, nowMs()))
     onChange(touchLayout({ ...layout, ...changes }))
+  }
+
+  /**
+   * During live seating, taking chairs away from a table where guests sit would quietly remove their seats
+   * (the database deletes the chair and the guest's place on it). So that change isn't made: a message says
+   * to clear the table first. Adding chairs is always fine. Returns true if the change was refused.
+   * (Deleting a whole table with guests has its own "Delete anyway?" question.)
+   */
+  function refuseIfGuestsLoseChairs(next: DesignTable[]): boolean {
+    if (occupiedTableIds.size === 0) return false
+    const before = new Map(layout.tables.map((t) => [t.id, t]))
+    const losing = next.filter((t) => {
+      const old = before.get(t.id)
+      if (!old || !occupiedTableIds.has(t.id)) return false
+      return t.seats < old.seats || (t.highchairs ?? 0) < (old.highchairs ?? 0)
+    })
+    if (losing.length === 0) return false
+    const names = losing.map((t) => t.name).join(', ')
+    setToast({
+      text: `Guests are seated at ${names}, so chairs can't be removed there now. Clear the table on the seating screen first.`,
+      at: nowMs(),
+      refused: true,
+    })
+    return true
   }
 
   /** Text and angle edits on the same item merge into one undo step; everything else is its own step. */
@@ -127,45 +157,17 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
 
   function handleUndo() {
     const result = undo(history, layout)
-    if (!result) return
+    if (!result || refuseIfGuestsLoseChairs(result.layout.tables)) return
     setHistory(result.history)
     onChange(touchLayout(result.layout))
   }
 
   function handleRedo() {
     const result = redo(history, layout)
-    if (!result) return
+    if (!result || refuseIfGuestsLoseChairs(result.layout.tables)) return
     setHistory(result.history)
     onChange(touchLayout(result.layout))
   }
-
-  // Keyboard (handy on a laptop): Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo (Cmd on Mac),
-  // Delete / Backspace deletes what's selected, Escape lets go of the selection.
-  // Inside a text box the keys are left alone, so they work on the typing like normal.
-  const keyActions = useRef({ undo: handleUndo, redo: handleRedo, remove: deleteSelected, escape: clearSelection })
-  useEffect(() => {
-    keyActions.current = { undo: handleUndo, redo: handleRedo, remove: deleteSelected, escape: clearSelection }
-  })
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return
-      if (document.querySelector('.modal-backdrop')) return // a dialog is open
-      const key = e.key.toLowerCase()
-      if (e.ctrlKey || e.metaKey) {
-        if (key === 'z' && !e.shiftKey) keyActions.current.undo()
-        else if ((key === 'z' && e.shiftKey) || key === 'y') keyActions.current.redo()
-        else return
-        e.preventDefault()
-      } else if (key === 'delete' || key === 'backspace') {
-        e.preventDefault()
-        keyActions.current.remove()
-      } else if (key === 'escape') {
-        keyActions.current.escape()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   // Hide the message after a few seconds.
   useEffect(() => {
@@ -398,6 +400,34 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
     else if (selection && selection.kind !== 'section') deleteItems(new Set([selection.id]))
   }
 
+  // Keyboard (handy on a laptop): Ctrl+Z undo, Ctrl+Shift+Z or Ctrl+Y redo (Cmd on Mac),
+  // Delete / Backspace deletes what's selected, Escape lets go of the selection.
+  // Inside a text box the keys are left alone, so they work on the typing like normal.
+  const keyActions = useRef({ undo: handleUndo, redo: handleRedo, remove: deleteSelected, escape: clearSelection })
+  useEffect(() => {
+    keyActions.current = { undo: handleUndo, redo: handleRedo, remove: deleteSelected, escape: clearSelection }
+  })
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return
+      if (document.querySelector('.modal-backdrop')) return // a dialog is open
+      const key = e.key.toLowerCase()
+      if (e.ctrlKey || e.metaKey) {
+        if (key === 'z' && !e.shiftKey) keyActions.current.undo()
+        else if ((key === 'z' && e.shiftKey) || key === 'y') keyActions.current.redo()
+        else return
+        e.preventDefault()
+      } else if (key === 'delete' || key === 'backspace') {
+        e.preventDefault()
+        keyActions.current.remove()
+      } else if (key === 'escape') {
+        keyActions.current.escape()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // ---------- Acting on many at once ----------
 
   const multiTables = multi ? layout.tables.filter((t) => multi.has(t.id)) : []
@@ -419,19 +449,32 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
     // Selected tables made into a big group become ONE group: one party, one name, seated together.
     const groupId = kind === 'group' ? newId('G') : null
     const name = kind === 'group' ? (multiTables.map((t) => t.guestName.trim()).find(Boolean) ?? '') : null
-    updateMultiTables((t) => {
-      const r = seatRule(t.shape, kind)
-      const seats = clamp(t.seats, r.min, r.max)
-      return { ...t, kind, seats, chairKinds: t.chairKinds.slice(0, seats), groupId, guestName: name ?? t.guestName }
-    })
+    updateMultiTables((t) => ({ ...withKind(t, kind), groupId, guestName: name ?? t.guestName }))
   }
 
   function groupSeats(delta: 1 | -1) {
     updateMultiTables((t) => {
       const r = seatRule(t.shape, t.kind)
+      // VIP / big group tables have an exact chair count: one chair at a time, odd numbers too.
+      if (t.kind !== 'regular') return withExactSeats(t, clamp(t.seats + delta, 1, r.max))
       const seats = clamp(t.seats + delta * r.step, r.min, r.max)
       return { ...t, seats, chairKinds: t.chairKinds.slice(0, seats) }
     })
+  }
+
+  // The selection is exactly one big group (every selected table in the same group): all of that group's tables.
+  const multiGroupId =
+    multiTables.length > 0 && multiTables.every((t) => t.kind === 'group' && t.groupId && t.groupId === multiTables[0].groupId)
+      ? multiTables[0].groupId
+      : null
+  const multiGroupTables = multiGroupId ? layout.tables.filter((t) => t.kind === 'group' && t.groupId === multiGroupId) : []
+
+  /** The selected big group gets exactly `total` seats: chairs come off its last table (8 + 8 for 15 = 8 + 7). */
+  function groupExactSeats(total: number) {
+    const result = splitGroupSeats(multiGroupTables, total)
+    if ('problem' in result) return
+    const changed = new Map(result.tables.map((t) => [t.id, t]))
+    save({ tables: layout.tables.map((t) => changed.get(t.id) ?? t) })
   }
 
   function groupTurn(degrees: number) {
@@ -630,6 +673,9 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
               )
             }}
             onSeats={groupSeats}
+            groupTables={multiGroupTables}
+            onGroupSeats={groupExactSeats}
+            onRestoreSeats={() => updateMultiTables(withNormalSeats)}
             onTurn={groupTurn}
             onArrange={groupArrange}
             onCopy={groupCopy}
@@ -641,6 +687,11 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
             key={selectedTable.id}
             table={selectedTable}
             sections={layout.sections}
+            groupTableCount={
+              selectedTable.kind === 'group' && selectedTable.groupId
+                ? layout.tables.filter((t) => t.kind === 'group' && t.groupId === selectedTable.groupId).length
+                : 1
+            }
             onChange={(changes) => updateTable(selectedTable.id, changes)}
             onOpenSection={(id) => setSelection({ kind: 'section', id })}
             onCopy={(count) => copyTable(selectedTable, count)}
@@ -711,17 +762,19 @@ function LayoutEditor({ layout, onChange, onBack, onStartSeating, occupiedTableI
       )}
 
       {toast && (
-        <div className="toast" role="status" key={toast.at}>
+        <div className={`toast${toast.refused ? ' toast--error' : ''}`} role={toast.refused ? 'alert' : 'status'} key={toast.at}>
           <span>{toast.text}</span>
-          <button
-            className="btn toast__undo"
-            onClick={() => {
-              handleUndo()
-              setToast(null)
-            }}
-          >
-            Undo
-          </button>
+          {!toast.refused && (
+            <button
+              className="btn toast__undo"
+              onClick={() => {
+                handleUndo()
+                setToast(null)
+              }}
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
     </div>

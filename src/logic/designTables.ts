@@ -19,6 +19,83 @@ export function seatRule(shape: TableShape, kind: TableKind) {
   return kind === 'group' ? { ...rule, max: GROUP_MAX[shape] } : rule
 }
 
+// ---------- Exact chair counts (VIP and big group tables) ----------
+
+const SHAPE_WORDS: Record<TableShape, string> = { circle: 'round', square: 'square', rectangle: 'long' }
+
+/**
+ * Checks a typed exact chair count for one VIP / big group table.
+ * Any whole number from 1 up to the shape's limit is fine, odd numbers too. Returns why not, or null if fine.
+ */
+export function exactSeatsProblem(shape: TableShape, kind: TableKind, seats: number): string | null {
+  if (!Number.isInteger(seats) || seats < 1) return 'Type a whole number of chairs, 1 or more.'
+  const max = seatRule(shape, kind).max
+  if (seats > max) {
+    return `A ${SHAPE_WORDS[shape]} ${kind === 'group' ? 'big group' : 'VIP'} table can have at most ${max} chairs.`
+  }
+  return null
+}
+
+/**
+ * The table with exactly `seats` chairs. Its usual size is remembered (the first time it changes)
+ * so it can be restored. Wheelchair marks are kept, so they come back too.
+ */
+export function withExactSeats(t: DesignTable, seats: number): DesignTable {
+  const normal = t.normalSeats ?? t.seats
+  return { ...t, seats, normalSeats: seats === normal ? null : normal }
+}
+
+/** The table back at its usual number of chairs (unchanged if it already has them). */
+export function withNormalSeats(t: DesignTable): DesignTable {
+  return t.normalSeats ? { ...t, seats: t.normalSeats, normalSeats: null } : t
+}
+
+/** Tables in label order: T2 before T10. */
+export function byTableName(a: DesignTable, b: DesignTable): number {
+  return a.name.localeCompare(b.name, undefined, { numeric: true })
+}
+
+/**
+ * Gives a big group exactly `total` chairs. Tables keep their usual size in label order and the
+ * last tables give up chairs: 8 + 8 for 15 becomes 8 + 7. Every table keeps at least 1 chair.
+ * Returns the changed tables, or why it can't be done.
+ */
+export function splitGroupSeats(tables: DesignTable[], total: number): { tables: DesignTable[] } | { problem: string } {
+  const ordered = [...tables].sort(byTableName)
+  const normals = ordered.map((t) => t.normalSeats ?? t.seats)
+  const most = normals.reduce((sum, n) => sum + n, 0)
+  const n = ordered.length
+  if (!Number.isInteger(total) || total < 1) return { problem: 'Type a whole number of seats, 1 or more.' }
+  if (total < n) return { problem: `Each of the ${n} tables needs at least 1 chair, so this group needs at least ${n} seats.` }
+  if (total > most) {
+    return { problem: `These ${n} tables hold at most ${most} at their normal size. Add a table to the group or make one bigger.` }
+  }
+  let left = total
+  const result = ordered.map((t, i) => {
+    const tablesAfter = n - i - 1
+    const seats = Math.min(normals[i], left - tablesAfter)
+    left -= seats
+    return withExactSeats(t, seats)
+  })
+  return { tables: result }
+}
+
+/**
+ * The table changed to another type. Back to Regular: its usual chairs come back (an exact count is
+ * only for VIP / big groups). Seats are kept within the new type's limits.
+ */
+export function withKind(t: DesignTable, kind: TableKind): DesignTable {
+  const r = seatRule(t.shape, kind)
+  if (kind === 'regular') {
+    const base = withNormalSeats(t)
+    let seats = clamp(base.seats, r.min, r.max)
+    if (r.step === 2 && seats % 2 !== 0) seats = Math.min(r.max, seats + 1)
+    return { ...base, kind, seats, normalSeats: null, chairKinds: base.chairKinds.slice(0, seats) }
+  }
+  const seats = clamp(t.seats, 1, r.max)
+  return { ...withExactSeats(t, seats), kind }
+}
+
 /** Look and wording of each table type. */
 export const TABLE_KINDS: Record<TableKind, { label: string; fill: string; stroke: string; text: string; namePrompt: string }> = {
   regular: { label: 'Regular', fill: '#D9DDE2', stroke: '#9AA3AD', text: '#1F2933', namePrompt: '' },
@@ -141,6 +218,8 @@ export function toTable(t: DesignTable): Table {
     shape: t.shape,
     x: t.x,
     y: t.y,
+    // A table cut down to fewer chairs keeps its usual size on the floor (with a gap).
+    size: t.normalSeats ?? undefined,
     chairs: [
       // The table's own seats (some may be wheelchair spots)...
       ...Array.from({ length: t.seats }, (_, i) => ({

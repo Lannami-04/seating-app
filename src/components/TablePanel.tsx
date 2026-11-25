@@ -1,12 +1,26 @@
 import { useState } from 'react'
 import type { ChairKind, DesignSection, DesignTable, TableKind } from '../types'
-import { CHAIR_KIND_CYCLE, MAX_HIGHCHAIRS, SEAT_RULES, TABLE_KINDS, chairKindAt, clamp, seatRule } from '../logic/designTables'
+import {
+  CHAIR_KIND_CYCLE,
+  MAX_HIGHCHAIRS,
+  SEAT_RULES,
+  TABLE_KINDS,
+  chairKindAt,
+  clamp,
+  exactSeatsProblem,
+  seatRule,
+  withExactSeats,
+  withKind,
+} from '../logic/designTables'
+import ExactSeatsField from './ExactSeatsField'
 import ChairKindIcon from './ChairKindIcon'
 import RotateControl from './RotateControl'
 
 interface TablePanelProps {
   table: DesignTable
   sections: DesignSection[]
+  /** How many tables are in this table's big group (1 = on its own). */
+  groupTableCount: number
   onChange: (changes: Partial<DesignTable>) => void
   /** Show the panel for this table's section (rename, color, pick tables). */
   onOpenSection: (sectionId: string) => void
@@ -23,16 +37,20 @@ const KIND_NAMES: Record<ChairKind, string> = {
 }
 
 /** Side panel for the selected table: seats, special seats, angle, section. */
-function TablePanel({ table, sections, onChange, onOpenSection, onCopy, onDelete, onDone }: TablePanelProps) {
+function TablePanel({ table, sections, groupTableCount, onChange, onOpenSection, onCopy, onDelete, onDone }: TablePanelProps) {
   const rule = seatRule(table.shape, table.kind)
   const [copies, setCopies] = useState(1)
   const [copyNote, setCopyNote] = useState('')
 
   function changeKind(kind: TableKind) {
-    // Leaving "big group" may mean too many seats for a normal table: trim to the limit.
-    const r = seatRule(table.shape, kind)
-    const seats = clamp(table.seats, r.min, r.max)
-    onChange({ kind, seats, chairKinds: table.chairKinds.slice(0, seats) })
+    // Seats stay within the new type's limits; back to Regular, the table gets its normal chairs back.
+    const t = withKind(table, kind)
+    onChange({ kind, seats: t.seats, normalSeats: t.normalSeats, chairKinds: t.chairKinds })
+  }
+
+  function setExactSeats(seats: number) {
+    const t = withExactSeats(table, seats)
+    onChange({ seats: t.seats, normalSeats: t.normalSeats })
   }
 
   function makeCopies() {
@@ -109,16 +127,42 @@ function TablePanel({ table, sections, onChange, onOpenSection, onCopy, onDelete
       </section>
 
       <section className="panel__group">
-        <h3>Seats</h3>
-        <div className="stepper">
-          <button className="btn btn--icon" onClick={() => changeSeats(-1)} disabled={table.seats <= rule.min} aria-label="Fewer seats">
-            −
+        <h3>{table.kind === 'regular' ? 'Seats' : 'Exact chairs'}</h3>
+        {table.kind === 'regular' ? (
+          <div className="stepper">
+            <button className="btn btn--icon" onClick={() => changeSeats(-1)} disabled={table.seats <= rule.min} aria-label="Fewer seats">
+              −
+            </button>
+            <span className="stepper__value">{table.seats}</span>
+            <button className="btn btn--icon" onClick={() => changeSeats(1)} disabled={table.seats >= rule.max} aria-label="More seats">
+              +
+            </button>
+          </div>
+        ) : (
+          <>
+            <ExactSeatsField
+              value={table.seats}
+              label="chairs at this table"
+              check={(seats) => exactSeatsProblem(table.shape, table.kind, seats)}
+              onSet={setExactSeats}
+            />
+            <p className="panel__hint">
+              Exactly this many chairs, odd numbers too. The party size, seated count and spare seats use this number.
+              {table.kind === 'group' && groupTableCount > 1 && (
+                <>
+                  {' '}
+                  This table is one of {groupTableCount} in its big group. To set the whole group's total, select all
+                  its tables.
+                </>
+              )}
+            </p>
+          </>
+        )}
+        {table.normalSeats ? (
+          <button className="btn btn--block" onClick={() => onChange({ seats: table.normalSeats ?? table.seats, normalSeats: null })}>
+            Restore normal size ({table.normalSeats} chairs)
           </button>
-          <span className="stepper__value">{table.seats}</span>
-          <button className="btn btn--icon" onClick={() => changeSeats(1)} disabled={table.seats >= rule.max} aria-label="More seats">
-            +
-          </button>
-        </div>
+        ) : null}
       </section>
 
       <section className="panel__group">

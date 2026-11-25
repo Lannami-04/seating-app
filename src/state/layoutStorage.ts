@@ -3,7 +3,7 @@
 // stored in the database (see remote.ts and useRestaurantLayouts.ts).
 
 import type { DesignSection, DesignTable, RestaurantLayout } from '../types'
-import { looksLikeAny, unusedSectionColor } from '../logic/designTables'
+import { looksLikeAny, unusedSectionColor, withKind } from '../logic/designTables'
 import { uuid } from '../lib/uuid'
 
 /** Where older versions of the app kept layouts in the browser (before the database). */
@@ -143,13 +143,16 @@ export function createLayout(name: string): RestaurantLayout {
 
 /**
  * After an event: every VIP / big group table becomes a plain regular table and loses its name.
- * Seats, wheelchair spots, highchairs, sections and positions are kept.
+ * A table set to an exact number of chairs gets its normal chairs back (7 becomes 8 again).
+ * Wheelchair spots, highchairs, sections and positions are kept.
  */
 export function withAllTablesRegular(layout: RestaurantLayout): RestaurantLayout {
   return touchLayout({
     ...layout,
     tables: layout.tables.map((t) =>
-      t.kind === 'regular' && !t.guestName && !t.groupId ? t : { ...t, kind: 'regular', guestName: '', groupId: null },
+      t.kind === 'regular' && !t.guestName && !t.groupId && !t.normalSeats
+        ? t
+        : { ...withKind(t, 'regular'), guestName: '', groupId: null },
     ),
   })
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DesignFeature, DesignSection, DesignTable, TableKind } from '../types'
-import { TABLE_KINDS, totalSeats } from '../logic/designTables'
+import { TABLE_KINDS, byTableName, splitGroupSeats, totalSeats } from '../logic/designTables'
+import ExactSeatsField from './ExactSeatsField'
 
 export type Arrangement = 'row' | 'column' | 'even'
 
@@ -17,6 +18,12 @@ interface SelectionPanelProps {
   onName: (name: string) => void
   /** Add or remove one seat (or two on long tables) at every selected table, within each table's limits. */
   onSeats: (delta: 1 | -1) => void
+  /** Every table of the one big group the selection is (empty if the selection isn't a single big group). */
+  groupTables: DesignTable[]
+  /** Give that big group exactly this many seats in total (chairs come off the last table). */
+  onGroupSeats: (total: number) => void
+  /** Put the normal chairs back on every selected table that has an exact chair count. */
+  onRestoreSeats: () => void
   /** Turn each selected thing in place by this many degrees. */
   onTurn: (degrees: number) => void
   onArrange: (how: Arrangement) => void
@@ -27,6 +34,7 @@ interface SelectionPanelProps {
 /** Side panel when many things are selected: act on all of them at once. */
 function SelectionPanel(props: SelectionPanelProps) {
   const { tables, features, sections, onDelete, onDone, onSection, onNewSection, onKind, onName, onSeats, onTurn, onArrange, onCopy } = props
+  const { groupTables, onGroupSeats, onRestoreSeats } = props
   const [newName, setNewName] = useState('')
   const [note, setNote] = useState('')
   const count = tables.length + features.length
@@ -38,6 +46,9 @@ function SelectionPanel(props: SelectionPanelProps) {
   const sharedName = named.length > 0 && named.every((t) => t.guestName === named[0].guestName) ? named[0].guestName : null
   const sharedKind = hasTables && tables.every((t) => t.kind === tables[0].kind) ? tables[0].kind : null
   const sharedSection = hasTables && tables.every((t) => t.sectionId === tables[0].sectionId) ? (tables[0].sectionId ?? '') : null
+
+  const trimmed = tables.filter((t) => t.normalSeats)
+  const groupNames = [...groupTables].sort(byTableName).map((t) => t.name)
 
   const parts: string[] = []
   if (hasTables) parts.push(`${tables.length} ${tables.length === 1 ? 'table' : 'tables'} · ${totalSeats(tables)} seats`)
@@ -139,6 +150,34 @@ function SelectionPanel(props: SelectionPanelProps) {
               />
             </label>
           )}
+        </section>
+      )}
+
+      {groupTables.length > 0 && (
+        <section className="panel__group">
+          <h3>Exact seats for this big group</h3>
+          <ExactSeatsField
+            value={totalSeats(groupTables)}
+            label="seats for the whole big group"
+            check={(total) => {
+              const result = splitGroupSeats(groupTables, total)
+              return 'problem' in result ? result.problem : null
+            }}
+            onSet={onGroupSeats}
+          />
+          <p className="panel__hint">
+            Exactly this many seats across {groupNames.join(', ')}, odd numbers too. Tables keep their normal size in
+            order and chairs come off the last table ({groupNames[groupNames.length - 1]}).
+          </p>
+        </section>
+      )}
+
+      {trimmed.length > 0 && (
+        <section className="panel__group">
+          <h3>Normal size</h3>
+          <button className="btn btn--block" onClick={onRestoreSeats}>
+            Restore normal size ({trimmed.length <= 3 ? trimmed.map((t) => `${t.name}: ${t.normalSeats}`).join(', ') : `${trimmed.length} tables`})
+          </button>
         </section>
       )}
 

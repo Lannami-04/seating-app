@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TableKind, TableShape } from '../types'
-import { SEAT_RULES, TABLE_KINDS, clamp, seatRule } from '../logic/designTables'
+import { SEAT_RULES, TABLE_KINDS, clamp, exactSeatsProblem, seatRule } from '../logic/designTables'
 
 /** Everything chosen in the dialog. Also remembered so the next "+ Table" starts with the same choices. */
 export interface NewTableChoice {
@@ -38,15 +38,27 @@ function Stepper({ value, min, max, step = 1, label, onChange }: { value: number
 /** Asks what kind of table to add (regular, VIP, big group), its shape, how many people, and how many tables. */
 function NewTableDialog({ initial, onCreate, onCancel }: NewTableDialogProps) {
   const [choice, setChoice] = useState<NewTableChoice>(initial)
+  // What's typed in the chair box (VIP / big group), kept as text so the box can be empty while typing.
+  const [seatsText, setSeatsText] = useState(String(initial.seats))
   const rule = seatRule(choice.shape, choice.kind)
+  // VIP and big group tables get exactly the number of chairs typed in, odd numbers too.
+  const exact = choice.kind !== 'regular'
+  const seatsProblem = exact ? exactSeatsProblem(choice.shape, choice.kind, choice.seats) : null
 
-  /** Changing type or shape keeps the seat count if it's still allowed, otherwise snaps it into range. */
+  /**
+   * Regular tables: changing type or shape keeps the seat count if it's still allowed, otherwise snaps it into range.
+   * VIP / big group: the number stays as typed; if it's too many for the shape, a message says so.
+   */
   function update(changes: Partial<NewTableChoice>) {
     const next = { ...choice, ...changes }
-    const r = seatRule(next.shape, next.kind)
-    let seats = clamp(next.seats, r.min, r.max)
-    if (r.step === 2 && seats % 2 !== 0) seats = Math.min(r.max, seats + 1)
+    let seats = next.seats
+    if (next.kind === 'regular') {
+      const r = seatRule(next.shape, next.kind)
+      seats = clamp(Math.round(seats) || r.start, r.min, r.max)
+      if (r.step === 2 && seats % 2 !== 0) seats = Math.min(r.max, seats + 1)
+    }
     setChoice({ ...next, seats })
+    setSeatsText(String(seats))
   }
 
   const look = TABLE_KINDS[choice.kind]
@@ -116,16 +128,45 @@ function NewTableDialog({ initial, onCreate, onCancel }: NewTableDialogProps) {
         )}
 
         <div className="field field--row">
-          <span className="field__label">People per table</span>
-          <Stepper value={choice.seats} min={rule.min} max={rule.max} step={rule.step} label="seats" onChange={(seats) => update({ seats })} />
+          <span className="field__label">{exact ? 'Exact chairs per table' : 'People per table'}</span>
+          {exact ? (
+            <div className="stepper">
+              <button type="button" className="btn btn--icon" onClick={() => update({ seats: Math.max(1, choice.seats - 1) })} disabled={choice.seats <= 1} aria-label="Fewer chairs">
+                −
+              </button>
+              <input
+                className="input exact-seats__input"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={rule.max}
+                value={seatsText}
+                aria-label="Exact chairs per table"
+                onChange={(e) => {
+                  setSeatsText(e.target.value)
+                  setChoice({ ...choice, seats: Number(e.target.value) })
+                }}
+              />
+              <button type="button" className="btn btn--icon" onClick={() => update({ seats: choice.seats + 1 })} disabled={choice.seats >= rule.max} aria-label="More chairs">
+                +
+              </button>
+            </div>
+          ) : (
+            <Stepper value={choice.seats} min={rule.min} max={rule.max} step={rule.step} label="seats" onChange={(seats) => update({ seats })} />
+          )}
         </div>
+        {seatsProblem && (
+          <p className="exact-seats__problem" role="alert">
+            {seatsProblem}
+          </p>
+        )}
 
         <div className="field field--row">
           <span className="field__label">How many tables</span>
           <Stepper value={choice.count} min={1} max={MAX_COUNT} label="tables" onChange={(count) => setChoice({ ...choice, count })} />
         </div>
 
-        <p className="panel__hint">
+        <p className="panel__hint" hidden={!!seatsProblem}>
           {choice.count} {look.label.toLowerCase()} {choice.count === 1 ? 'table' : 'tables'} × {choice.seats} = {choice.count * choice.seats} seats
         </p>
 
@@ -133,7 +174,7 @@ function NewTableDialog({ initial, onCreate, onCancel }: NewTableDialogProps) {
           <button type="button" className="btn" onClick={onCancel}>
             Cancel
           </button>
-          <button type="submit" className="btn btn--primary" disabled={needsName && !choice.guestName.trim()}>
+          <button type="submit" className="btn btn--primary" disabled={(needsName && !choice.guestName.trim()) || !!seatsProblem}>
             Add {choice.count === 1 ? 'table' : `${choice.count} tables`}
           </button>
         </div>

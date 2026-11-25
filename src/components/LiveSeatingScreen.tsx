@@ -304,6 +304,7 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
 
   function confirmEndSeating() {
     const special = layout.tables.filter((t) => t.kind !== 'regular').length
+    const exact = layout.tables.filter((t) => t.normalSeats).length
     setConfirm({
       title: 'End live seating?',
       message:
@@ -311,7 +312,8 @@ function LiveSeatingScreen({ layout, onBack, onEditLayout, onEndSeating, onEnded
         (special > 0
           ? `, and all ${special} VIP / big group ${special === 1 ? 'table becomes a regular table' : 'tables become regular tables'} with their names removed`
           : '') +
-        `. Seat counts, wheelchair-accessible seats, highchairs and sections stay the same. This can't be undone. You'll go back to the menu.`,
+        (exact > 0 ? `. ${exact === 1 ? 'The table' : `The ${exact} tables`} with an exact chair count get their normal chairs back` : '') +
+        `. Wheelchair-accessible seats, highchairs and sections stay the same. This can't be undone. You'll go back to the menu.`,
       confirmLabel: 'End live seating',
       danger: true,
       onConfirm: () => void onEndSeating(shared.eventId),

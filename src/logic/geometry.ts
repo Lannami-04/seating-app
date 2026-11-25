@@ -32,8 +32,18 @@ export function seatCount(table: Table): number {
   return table.chairs.filter((c) => c.kind !== 'highchair').length
 }
 
+/**
+ * How many seats the table top is drawn for: its usual size if it has fewer chairs than that, never fewer
+ * than its chairs. Long tables have one chair at each end and pairs along the sides, so they are drawn for an
+ * even number (at least 4); with an odd number of chairs, one spot stays empty.
+ */
+function drawnFor(table: Table): number {
+  const n = Math.max(table.size ?? 0, seatCount(table))
+  return table.shape === 'rectangle' ? Math.max(4, n + (n % 2)) : n
+}
+
 export function tableSize(table: Table): { width: number; height: number } {
-  const seats = seatCount(table)
+  const seats = drawnFor(table)
   if (table.shape === 'circle') {
     const d = roundRadius(seats) * 2
     return { width: d, height: d }
@@ -78,33 +88,37 @@ export function chairPositions(table: Table): Point[] {
   return [...seatPoints, ...extra]
 }
 
-/** Positions of the table's own seats (not the extra highchairs). */
+/**
+ * Positions of the table's own seats (not the extra highchairs).
+ * Spots are worked out for the size the table is drawn for; a table with fewer chairs than that
+ * uses the first spots and leaves the last ones empty.
+ */
 function seatPositions(table: Table): Point[] {
-  const seatChairs = table.chairs.filter((c) => c.kind !== 'highchair')
-  const seats = seatChairs.length
+  const seats = seatCount(table)
+  const spots = drawnFor(table)
   const { width, height } = tableSize(table)
 
   if (table.shape === 'circle') {
     const r = width / 2 + CHAIR_OFFSET
-    return seatChairs.map((_, i) => {
-      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / seats
+    return Array.from({ length: seats }, (_, i) => {
+      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / spots
       return { x: r * Math.cos(angle), y: r * Math.sin(angle) }
     })
   }
 
-  if (table.shape === 'square' && seats <= 4) {
+  if (table.shape === 'square' && spots <= 4) {
     const dx = width / 2 + CHAIR_OFFSET
     const dy = height / 2 + CHAIR_OFFSET
     // 2-tops face each other left/right; 4-tops get one chair per side.
-    const spots: Point[] =
-      seats <= 2
+    const points: Point[] =
+      spots <= 2
         ? [{ x: -dx, y: 0 }, { x: dx, y: 0 }]
         : [{ x: 0, y: -dy }, { x: dx, y: 0 }, { x: 0, y: dy }, { x: -dx, y: 0 }]
-    return spots.slice(0, seats)
+    return points.slice(0, seats)
   }
 
   // Rectangle: one chair at each end, the rest split along the two long sides.
-  const perSide = Math.max(1, (seats - 2) / 2)
+  const perSide = Math.max(1, (spots - 2) / 2)
   const top = -(height / 2 + CHAIR_OFFSET)
   const bottom = height / 2 + CHAIR_OFFSET
   const sideX = (i: number) => -width / 2 + CHAIR_SPACING * (i + 0.5)
