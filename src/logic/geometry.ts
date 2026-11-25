@@ -49,7 +49,8 @@ export function tableSize(table: Table): { width: number; height: number } {
     return { width: d, height: d }
   }
   if (table.shape === 'square') {
-    const side = (seats <= 2 ? 2.5 : 3) * TABLE_SCALE
+    // Up to 4 chairs: one per side. More: chairs go around all 4 sides and the square grows to fit them.
+    const side = seats <= 4 ? (seats <= 2 ? 2.5 : 3) * TABLE_SCALE : Math.max(3 * TABLE_SCALE, Math.ceil(seats / 4) * CHAIR_SPACING)
     return { width: side, height: side }
   }
   const perSide = Math.max(1, (seats - 2) / 2)
@@ -114,6 +115,25 @@ function seatPositions(table: Table): Point[] {
       spots <= 2
         ? [{ x: -dx, y: 0 }, { x: dx, y: 0 }]
         : [{ x: 0, y: -dy }, { x: dx, y: 0 }, { x: 0, y: dy }, { x: -dx, y: 0 }]
+    return points.slice(0, seats)
+  }
+
+  if (table.shape === 'square') {
+    // Big square: spots shared out over the 4 sides as evenly as possible (13 = 4 + 3 + 3 + 3),
+    // spaced evenly along each side, clockwise from the top-left.
+    const half = width / 2
+    const out = half + CHAIR_OFFSET
+    const points: Point[] = []
+    for (let side = 0; side < 4; side++) {
+      const k = Math.floor(spots / 4) + (side < spots % 4 ? 1 : 0)
+      for (let j = 0; j < k; j++) {
+        const along = -half + (width * (j + 0.5)) / k // left→right along this side
+        if (side === 0) points.push({ x: along, y: -out }) // top, left to right
+        if (side === 1) points.push({ x: out, y: along }) // right, top to bottom
+        if (side === 2) points.push({ x: -along, y: out }) // bottom, right to left
+        if (side === 3) points.push({ x: -out, y: -along }) // left, bottom to top
+      }
+    }
     return points.slice(0, seats)
   }
 

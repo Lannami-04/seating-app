@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { DesignTable } from '../types'
-import { DESIGN_CHAIR_RADIUS, designTableBox, shortName, toTable } from '../logic/designTables'
+import { DESIGN_CHAIR_RADIUS, designTableBox, overviewSize, shortName, toTable } from '../logic/designTables'
 import { tableSize } from '../logic/geometry'
 import { colors } from '../theme'
 
@@ -22,6 +22,8 @@ interface TableNameLabelsProps {
   scale: number
   /** Zoomed in far enough to see chairs: show full names and keep clear of the chairs. */
   zoomedIn: boolean
+  /** Live floor only: how much bigger each table is drawn when zoomed out (see overviewGrowth). */
+  growth?: Map<string, number>
 }
 
 /** Smallest name size in screen pixels (stays readable), and its size in floor units when zoomed in. */
@@ -50,25 +52,21 @@ function textWidth(text: string, size: number): number {
 
 type Rect = { minX: number; minY: number; maxX: number; maxY: number }
 
-/** How far a table reaches up/down from its center: just the table top, or table + chairs when chairs show. */
-function halfHeight(t: DesignTable, withChairs: boolean): number {
-  if (withChairs) {
-    const b = designTableBox(t, DESIGN_CHAIR_RADIUS)
-    return (b.maxY - b.minY) / 2
-  }
-  const { width, height } = tableSize(toTable(t))
-  if (t.shape === 'circle') return width / 2
-  const a = (t.rotation * Math.PI) / 180
-  return (Math.abs(width * Math.sin(a)) + Math.abs(height * Math.cos(a))) / 2
-}
-
-/** The area a table covers on the floor (table top, plus chairs when they're showing), for keeping names off it. */
-function tableRect(t: DesignTable, withChairs: boolean): Rect {
+/**
+ * The area a table covers on the floor, for keeping names off it: table + chairs when chairs show; otherwise
+ * the table top as drawn (on the zoomed-out live floor that's the bigger top, grown by `grow`).
+ */
+function tableRect(t: DesignTable, withChairs: boolean, grow?: number): Rect {
   if (withChairs) return designTableBox(t, DESIGN_CHAIR_RADIUS)
-  const { width, height } = tableSize(toTable(t))
+  let { width, height } = tableSize(toTable(t))
+  if (grow !== undefined) {
+    const s = overviewSize(t)
+    width = s.width * grow
+    height = s.height * grow
+  }
   const a = (t.rotation * Math.PI) / 180
   const hw = t.shape === 'circle' ? width / 2 : (Math.abs(width * Math.cos(a)) + Math.abs(height * Math.sin(a))) / 2
-  const hh = halfHeight(t, false)
+  const hh = t.shape === 'circle' ? width / 2 : (Math.abs(width * Math.sin(a)) + Math.abs(height * Math.cos(a))) / 2
   return { minX: t.x - hw, minY: t.y - hh, maxX: t.x + hw, maxY: t.y + hh }
 }
 
@@ -107,13 +105,15 @@ interface NameItem {
  * and if even that fails it takes the spot with the least overlap.
  * Names are done top to bottom, left to right.
  */
-function TableNameLabels({ tables, nameOf, scale, zoomedIn }: TableNameLabelsProps) {
+function TableNameLabels({ tables, nameOf, scale, zoomedIn, growth }: TableNameLabelsProps) {
   const font = Math.max(NAME_PX / scale, zoomedIn ? NAME_UNITS : 0)
 
   const placed = useMemo(() => {
     const result: { key: string; ids: string[]; text: string; color: string; x: number; y: number; size: number }[] = []
     const names: Rect[] = []
-    const rects = new Map(tables.map((t) => [t.id, tableRect(t, zoomedIn)]))
+    // The table top as drawn right now (zoomed out on the live floor: the bigger one).
+    const top = (t: DesignTable) => tableRect(t, false, zoomedIn ? undefined : growth?.get(t.id))
+    const rects = new Map(tables.map((t) => [t.id, zoomedIn ? tableRect(t, true) : top(t)]))
     const minSize = 7 / scale
 
     // 1. Who gets a name, and which big-group tables share one (same name, sitting next to each other).
@@ -123,7 +123,7 @@ function TableNameLabels({ tables, nameOf, scale, zoomedIn }: TableNameLabelsPro
       const name = nameOf(t)
       if (!name || name.text.trim() === '') continue
       if (name.groupKey) byKey.set(name.groupKey, [...(byKey.get(name.groupKey) ?? []), t])
-      else items.push({ ids: [t.id], name, box: tableRect(t, false) })
+      else items.push({ ids: [t.id], name, box: top(t) })
     }
     for (const group of byKey.values()) {
       // Join tables into clusters of neighbours (a party split across the room gets one name per cluster).
@@ -138,7 +138,7 @@ function TableNameLabels({ tables, nameOf, scale, zoomedIn }: TableNameLabelsPro
         clusters.push(merged)
       }
       for (const c of clusters) {
-        items.push({ ids: c.map((t) => t.id), name: nameOf(c[0]) as TableName, box: union(c.map((t) => tableRect(t, false))) })
+        items.push({ ids: c.map((t) => t.id), name: nameOf(c[0]) as TableName, box: union(c.map(top)) })
       }
     }
     items.sort((a, b) => (a.box.minY + a.box.maxY) / 2 - (b.box.minY + b.box.maxY) / 2 || a.box.minX - b.box.minX)
@@ -216,7 +216,7 @@ function TableNameLabels({ tables, nameOf, scale, zoomedIn }: TableNameLabelsPro
       result.push({ key: item.ids.join('+'), ids: item.ids, text, color: item.name.color, x: pick.x, y: pick.y, size: pick.size })
     }
     return result
-  }, [tables, nameOf, font, zoomedIn, scale])
+  }, [tables, nameOf, font, zoomedIn, scale, growth])
 
   return (
     <g pointerEvents="none">

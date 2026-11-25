@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ChairKind, DesignSection, DesignTable, TableKind } from '../types'
 import {
   CHAIR_KIND_CYCLE,
+  EXACT_MAX,
   MAX_HIGHCHAIRS,
   SEAT_RULES,
   TABLE_KINDS,
@@ -129,6 +130,7 @@ function TablePanel({ table, sections, groupTableCount, onChange, onOpenSection,
       <section className="panel__group">
         <h3>{table.kind === 'regular' ? 'Seats' : 'Exact chairs'}</h3>
         {table.kind === 'regular' ? (
+          <>
           <div className="stepper">
             <button className="btn btn--icon" onClick={() => changeSeats(-1)} disabled={table.seats <= rule.min} aria-label="Fewer seats">
               −
@@ -138,16 +140,19 @@ function TablePanel({ table, sections, groupTableCount, onChange, onOpenSection,
               +
             </button>
           </div>
+          {rule.step === 2 && <p className="panel__hint">Need an odd number? Switch the type to VIP or Big group.</p>}
+          </>
         ) : (
           <>
             <ExactSeatsField
               value={table.seats}
               label="chairs at this table"
-              check={(seats) => exactSeatsProblem(table.shape, table.kind, seats)}
+              check={(seats) => exactSeatsProblem(table.shape, seats)}
               onSet={setExactSeats}
             />
             <p className="panel__hint">
-              Exactly this many chairs, odd numbers too. The party size, seated count and spare seats use this number.
+              Exactly this many chairs, odd numbers too. The table grows to fit them (round up to {EXACT_MAX.circle},
+              long and square up to {EXACT_MAX.rectangle}). The party size, seated count and spare seats use this number.
               {table.kind === 'group' && groupTableCount > 1 && (
                 <>
                   {' '}

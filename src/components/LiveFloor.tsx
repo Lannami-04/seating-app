@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import type { RestaurantLayout } from '../types'
 import type { Point } from '../logic/geometry'
-import { tableBounds } from '../logic/geometry'
-import { DESIGN_CHAIR_RADIUS, clamp, contentBox, designTableBox, toTable } from '../logic/designTables'
+import { DESIGN_CHAIR_RADIUS, OVERVIEW_HALO, clamp, contentBox, designTableBox, overviewGrowth, overviewSize } from '../logic/designTables'
 import type { Box } from '../logic/designTables'
 import { colors } from '../theme'
 import { loadShowSections, saveShowSections } from '../state/viewPrefs'
@@ -68,25 +67,34 @@ function zoomAt(base: View, factor: number, cx: number, cy: number, minScale: nu
   return { scale, x: cx - (cx - base.x) * k, y: cy - (cy - base.y) * k }
 }
 
-/** How far a fullness glow reaches past the table's chairs, in layout units. */
-const HALO = 1.6
-
-/** Soft glow behind each table in its fullness color (gray / yellow / red); none for full or reserved tables. */
-function TableHalos({ tables, looks }: { tables: RestaurantLayout['tables']; looks: Map<string, LiveTableLook> }) {
+/**
+ * Soft glow behind each table in its fullness color (gray / yellow / red); none for full or reserved tables.
+ * It reaches a little past the table and its chairs, and grows with the table when zoomed out (`growth`).
+ */
+function TableHalos({
+  tables,
+  looks,
+  growth,
+}: {
+  tables: RestaurantLayout['tables']
+  looks: Map<string, LiveTableLook>
+  growth: Map<string, number> | null
+}) {
   return (
     <g opacity={0.45} pointerEvents="none">
       {tables.map((t) => {
         const color = looks.get(t.id)?.halo
         if (!color) return null
-        const b = tableBounds(toTable({ ...t, x: 0, y: 0 }), DESIGN_CHAIR_RADIUS)
-        const w = b.width + HALO * 2
-        const h = b.height + HALO * 2
+        const s = overviewSize(t)
+        const k = growth?.get(t.id) ?? 1
+        const w = s.width * k + OVERVIEW_HALO * 2
+        const h = s.height * k + OVERVIEW_HALO * 2
         return (
           <rect
             key={t.id}
             transform={`translate(${t.x} ${t.y}) rotate(${t.rotation})`}
-            x={b.minX - HALO}
-            y={b.minY - HALO}
+            x={-w / 2}
+            y={-h / 2}
             width={w}
             height={h}
             rx={Math.min(w, h) / 2}
@@ -99,9 +107,10 @@ function TableHalos({ tables, looks }: { tables: RestaurantLayout['tables']; loo
 }
 
 /** Soft, slowly pulsing glow behind the suggested table. */
-function SuggestGlow({ table, scale }: { table: RestaurantLayout['tables'][number]; scale: number }) {
+function SuggestGlow({ table, scale, grow }: { table: RestaurantLayout['tables'][number]; scale: number; grow: number }) {
   const b = designTableBox(table, DESIGN_CHAIR_RADIUS)
-  const r = Math.max((b.maxX - b.minX) / 2, (b.maxY - b.minY) / 2) + 14 / scale
+  // Zoomed out the table is drawn bigger (`grow`), so the glow grows with it.
+  const r = Math.max((b.maxX - b.minX) / 2, (b.maxY - b.minY) / 2) * grow + 14 / scale
   return (
     <g pointerEvents="none">
       <circle className="suggest-glow" cx={table.x} cy={table.y} r={r} fill="#1F6F8B" />
@@ -152,6 +161,8 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
   // "Whole layout" view: the tables and room items fill the whole area, with a small margin.
   // (Recomputed whenever the floor area changes size, so it always fits while not zoomed by hand.)
   const fit = useMemo(() => fitView(size.width, size.height, contentBox(layout)), [size, layout])
+  // Zoomed out, each table is drawn bigger, as much as the room around it allows (worked out once per layout).
+  const growth = useMemo(() => overviewGrowth(layout), [layout])
   const view = userView ?? fit
   // Can always zoom out far enough to see the entire floor, even though the fit view zooms to the tables.
   const minScale = Math.min(fit.scale, Math.min(size.width / layout.width, size.height / layout.height)) * 0.8
@@ -312,7 +323,7 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
               <rect width={layout.width} height={layout.height} rx={1} fill={colors.ground} stroke={colors.groundStroke} strokeWidth={0.3} />
 
               {/* How full each table is: a soft glow behind it (the section shows only as its name). */}
-              <TableHalos tables={layout.tables} looks={looks} />
+              <TableHalos tables={layout.tables} looks={looks} growth={zoomedIn ? null : growth} />
 
               {layout.features.map((f) => (
                 <DesignFeatureShape key={f.id} feature={f} scale={view.scale} />
@@ -337,7 +348,7 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
                       }
                     }}
                   >
-                    {t.id === suggestedTableId && <SuggestGlow table={t} scale={view.scale} />}
+                    {t.id === suggestedTableId && <SuggestGlow table={t} scale={view.scale} grow={zoomedIn ? 1 : (growth.get(t.id) ?? 1)} />}
                     <DesignTableShape
                       table={t}
                       live={look}
@@ -345,6 +356,7 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
                       showChairs={zoomedIn}
                       scale={view.scale}
                       hideNames
+                      overviewScale={growth.get(t.id) ?? 1}
                     />
                   </g>
                 )
@@ -354,7 +366,7 @@ function LiveFloor({ layout, looks, selectedTableIds, selectableTableIds, onTabl
               {showSections && <SectionLabels layout={layout} scale={view.scale} />}
 
               {/* VIP / party names: middle of the table, or just above / below if another name is in the way. */}
-              <TableNameLabels tables={layout.tables} nameOf={nameOf} scale={view.scale} zoomedIn={zoomedIn} />
+              <TableNameLabels tables={layout.tables} nameOf={nameOf} scale={view.scale} zoomedIn={zoomedIn} growth={growth} />
             </g>
           </svg>
         )}

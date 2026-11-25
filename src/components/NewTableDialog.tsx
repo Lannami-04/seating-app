@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TableKind, TableShape } from '../types'
-import { SEAT_RULES, TABLE_KINDS, clamp, exactSeatsProblem, seatRule } from '../logic/designTables'
+import { EXACT_MAX, SEAT_RULES, TABLE_KINDS, clamp, exactSeatsProblem, seatRule, shapeFits } from '../logic/designTables'
 
 /** Everything chosen in the dialog. Also remembered so the next "+ Table" starts with the same choices. */
 export interface NewTableChoice {
@@ -43,7 +43,9 @@ function NewTableDialog({ initial, onCreate, onCancel }: NewTableDialogProps) {
   const rule = seatRule(choice.shape, choice.kind)
   // VIP and big group tables get exactly the number of chairs typed in, odd numbers too.
   const exact = choice.kind !== 'regular'
-  const seatsProblem = exact ? exactSeatsProblem(choice.shape, choice.kind, choice.seats) : null
+  const seatsProblem = exact ? exactSeatsProblem(choice.shape, choice.seats) : null
+  // Round tables only go up to 20 chairs: for more, the Round button is greyed out.
+  const roundTooSmall = exact && !shapeFits('circle', choice.seats)
 
   /**
    * Regular tables: changing type or shape keeps the seat count if it's still allowed, otherwise snaps it into range.
@@ -106,12 +108,16 @@ function NewTableDialog({ initial, onCreate, onCancel }: NewTableDialogProps) {
                 type="button"
                 className={`segmented__btn${choice.shape === s ? ' segmented__btn--on' : ''}`}
                 aria-pressed={choice.shape === s}
+                disabled={exact && !shapeFits(s, choice.seats) && choice.shape !== s}
                 onClick={() => update({ shape: s })}
               >
                 {SEAT_RULES[s].label}
               </button>
             ))}
           </div>
+          {roundTooSmall && choice.shape !== 'circle' && (
+            <span className="panel__hint">Round fits up to {EXACT_MAX.circle} chairs, so pick Long or Square.</span>
+          )}
         </div>
 
         {choice.kind !== 'regular' && (
@@ -169,6 +175,9 @@ function NewTableDialog({ initial, onCreate, onCancel }: NewTableDialogProps) {
         <p className="panel__hint" hidden={!!seatsProblem}>
           {choice.count} {look.label.toLowerCase()} {choice.count === 1 ? 'table' : 'tables'} × {choice.seats} = {choice.count * choice.seats} seats
         </p>
+        {needsName && !choice.guestName.trim() && !seatsProblem && (
+          <p className="panel__hint">Type the VIP guest's name to add this table.</p>
+        )}
 
         <div className="confirm__actions">
           <button type="button" className="btn" onClick={onCancel}>

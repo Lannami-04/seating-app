@@ -10,28 +10,39 @@ export const SEAT_RULES: Record<TableShape, { min: number; max: number; step: nu
   rectangle: { min: 4, max: 20, step: 2, start: 6, label: 'Long' },
 }
 
-/** Big-group tables can be larger than the usual limits. */
-const GROUP_MAX: Record<TableShape, number> = { circle: 16, square: 4, rectangle: 30 }
+/** Most chairs one table can have. The database allows up to 60 per table (tables.seats). */
+export const MAX_TABLE_SEATS = 60
 
-/** Seat limits for a table of this shape and type. */
+/**
+ * Most chairs on one VIP / big group table, per shape. The table grows to fit its chairs.
+ * Round stops at 20 (about 17 ft across); long and square go up to the database limit.
+ */
+export const EXACT_MAX: Record<TableShape, number> = { circle: 20, square: MAX_TABLE_SEATS, rectangle: MAX_TABLE_SEATS }
+
+/** Seat limits for a table of this shape and type. VIP / big group: any number from 1 up to the shape's max. */
 export function seatRule(shape: TableShape, kind: TableKind) {
   const rule = SEAT_RULES[shape]
-  return kind === 'group' ? { ...rule, max: GROUP_MAX[shape] } : rule
+  return kind === 'regular' ? rule : { ...rule, min: 1, step: 1, max: EXACT_MAX[shape] }
 }
 
 // ---------- Exact chair counts (VIP and big group tables) ----------
 
-const SHAPE_WORDS: Record<TableShape, string> = { circle: 'round', square: 'square', rectangle: 'long' }
+/** Can a VIP / big group table of this shape hold this many chairs? (Used to grey out Round for big numbers.) */
+export function shapeFits(shape: TableShape, seats: number): boolean {
+  return seats <= EXACT_MAX[shape]
+}
 
 /**
  * Checks a typed exact chair count for one VIP / big group table.
  * Any whole number from 1 up to the shape's limit is fine, odd numbers too. Returns why not, or null if fine.
  */
-export function exactSeatsProblem(shape: TableShape, kind: TableKind, seats: number): string | null {
+export function exactSeatsProblem(shape: TableShape, seats: number): string | null {
   if (!Number.isInteger(seats) || seats < 1) return 'Type a whole number of chairs, 1 or more.'
-  const max = seatRule(shape, kind).max
-  if (seats > max) {
-    return `A ${SHAPE_WORDS[shape]} ${kind === 'group' ? 'big group' : 'VIP'} table can have at most ${max} chairs.`
+  if (seats > MAX_TABLE_SEATS) {
+    return `One table holds at most ${MAX_TABLE_SEATS} chairs. For more, make a big group of 2 or more tables.`
+  }
+  if (!shapeFits(shape, seats)) {
+    return `A round table fits at most ${EXACT_MAX[shape]} chairs. Pick Long or Square for ${seats}.`
   }
   return null
 }
@@ -58,17 +69,24 @@ export function byTableName(a: DesignTable, b: DesignTable): number {
 /**
  * Gives a big group exactly `total` chairs. Tables keep their usual size in label order and the
  * last tables give up chairs: 8 + 8 for 15 becomes 8 + 7. Every table keeps at least 1 chair.
+ * More than the usual sizes hold: the last table grows (8 + 8 for 19 becomes 8 + 11), up to its shape's max.
  * Returns the changed tables, or why it can't be done.
  */
 export function splitGroupSeats(tables: DesignTable[], total: number): { tables: DesignTable[] } | { problem: string } {
   const ordered = [...tables].sort(byTableName)
   const normals = ordered.map((t) => t.normalSeats ?? t.seats)
-  const most = normals.reduce((sum, n) => sum + n, 0)
+  const usual = normals.reduce((sum, n) => sum + n, 0)
   const n = ordered.length
   if (!Number.isInteger(total) || total < 1) return { problem: 'Type a whole number of seats, 1 or more.' }
   if (total < n) return { problem: `Each of the ${n} tables needs at least 1 chair, so this group needs at least ${n} seats.` }
-  if (total > most) {
-    return { problem: `These ${n} tables hold at most ${most} at their normal size. Add a table to the group or make one bigger.` }
+  if (total > usual) {
+    const last = ordered[n - 1]
+    const lastMax = EXACT_MAX[last.shape]
+    const most = usual - normals[n - 1] + lastMax
+    if (total > most) {
+      return { problem: `These ${n} tables hold at most ${most} (${last.name} can grow to ${lastMax}). Add a table to the group.` }
+    }
+    return { tables: ordered.map((t, i) => withExactSeats(t, i === n - 1 ? normals[i] + total - usual : normals[i])) }
   }
   let left = total
   const result = ordered.map((t, i) => {
@@ -490,7 +508,7 @@ export function featureShape(f: DesignFeature): Pt[] {
 }
 
 /** Do two 4-cornered shapes overlap? (Separating-axis test: they don't if some edge direction splits them.) */
-function shapesOverlap(a: Pt[], b: Pt[]): boolean {
+export function shapesOverlap(a: Pt[], b: Pt[]): boolean {
   for (const poly of [a, b]) {
     for (let i = 0; i < poly.length; i++) {
       const p = poly[i]
@@ -507,6 +525,100 @@ function shapesOverlap(a: Pt[], b: Pt[]): boolean {
 }
 
 const rectShape = (cx: number, cy: number, w: number, h: number): Pt[] => corners(cx, cy, -w / 2, -h / 2, w / 2, h / 2, 0)
+
+// ---------- Zoomed-out live floor: bigger tables ----------
+
+/** How far the fullness glow reaches past a table on the zoomed-out live floor, in layout units. */
+export const OVERVIEW_HALO = 1.6
+/** Tables grow at most this much past the space their chairs use. */
+export const OVERVIEW_MAX_GROW = 1.5
+/** Extra space kept between two grown glows (and between a glow and a room item), in layout units. */
+const OVERVIEW_GAP = 0.8
+
+/**
+ * Zoomed out, the chairs are hidden, so the table top is drawn over the space they would use:
+ * the size of table + chairs (not turned), kept centered on the table.
+ */
+export function overviewSize(t: DesignTable): { width: number; height: number } {
+  const b = tableBounds(toTable({ ...t, x: 0, y: 0 }), DESIGN_CHAIR_RADIUS)
+  // Centered: an empty chair spot on one side mustn't shift the table off its real middle.
+  const width = 2 * Math.max(-b.minX, b.minX + b.width)
+  const height = 2 * Math.max(-b.minY, b.minY + b.height)
+  return t.shape === 'circle' ? { width: Math.max(width, height), height: Math.max(width, height) } : { width, height }
+}
+
+/** A table's glow outline (turned with the table) when grown by `k`, plus `pad` on every side. */
+function glowOutline(t: DesignTable, k: number, pad: number): Pt[] {
+  const s = overviewSize(t)
+  const hw = (s.width * k) / 2 + OVERVIEW_HALO + pad
+  const hh = (s.height * k) / 2 + OVERVIEW_HALO + pad
+  return corners(t.x, t.y, -hw, -hh, hw, hh, t.rotation)
+}
+
+/** The biggest grow factor from 1 to the max for which `fits` is true (it only gets harder as tables grow). */
+function largestFit(fits: (k: number) => boolean): number {
+  if (fits(OVERVIEW_MAX_GROW)) return OVERVIEW_MAX_GROW
+  if (!fits(1)) return 1
+  let lo = 1
+  let hi = OVERVIEW_MAX_GROW
+  for (let i = 0; i < 12; i++) {
+    const mid = (lo + hi) / 2
+    if (fits(mid)) lo = mid
+    else hi = mid
+  }
+  return lo
+}
+
+/**
+ * How much each table can grow on the zoomed-out live floor (table id → factor, 1 to 1.5) without its glow
+ * touching another table's glow or any room item (dividers, stage, bar...). Positions never change.
+ * All tables in a section grow by the same amount (the section's tightest spot), so same-size tables still match.
+ * A table already touching something stays at 1: never worse than before.
+ */
+export function overviewGrowth(layout: { tables: DesignTable[]; features: DesignFeature[] }): Map<string, number> {
+  const { tables } = layout
+  const pad = OVERVIEW_GAP / 2
+  const features = layout.features.map(featureShape)
+  const limit = tables.map(() => OVERVIEW_MAX_GROW)
+  // Already touching something at normal size (no room at all): stays as it is, without holding its section back.
+  const stuck = tables.map(() => false)
+  // How far each table's grown glow can reach from its middle: pairs further apart than that can't touch.
+  const reach = tables.map((t) => {
+    const s = overviewSize(t)
+    return (Math.hypot(s.width, s.height) / 2) * OVERVIEW_MAX_GROW + OVERVIEW_HALO + pad
+  })
+  const cap = (i: number, k: number, fitsAtNormal: boolean) => {
+    limit[i] = Math.min(limit[i], k)
+    if (!fitsAtNormal) stuck[i] = true
+  }
+
+  tables.forEach((t, i) => {
+    // Room items don't grow: this table alone must stay clear of the ones its biggest glow would touch.
+    const near = features.filter((f) => shapesOverlap(glowOutline(t, OVERVIEW_MAX_GROW, pad), f))
+    const clearOfItems = (k: number) => !near.some((f) => shapesOverlap(glowOutline(t, k, pad), f))
+    if (near.length > 0) cap(i, largestFit(clearOfItems), clearOfItems(1))
+    // Two tables: both grow by the same amount; find the most they can both take. (Each ends up growing
+    // by no more than this, so they stay apart: a smaller outline sits inside the bigger one.)
+    for (let j = i + 1; j < tables.length; j++) {
+      const u = tables[j]
+      if (Math.hypot(u.x - t.x, u.y - t.y) > reach[i] + reach[j]) continue
+      const apart = (g: number) => !shapesOverlap(glowOutline(t, g, pad), glowOutline(u, g, pad))
+      const k = largestFit(apart)
+      const ok = apart(1)
+      cap(i, k, ok)
+      cap(j, k, ok)
+    }
+  })
+
+  // Same growth across a section: its tightest table that still has some room sets it.
+  const bySection = new Map<string, number>()
+  tables.forEach((t, i) => {
+    if (t.sectionId && !stuck[i]) bySection.set(t.sectionId, Math.min(bySection.get(t.sectionId) ?? OVERVIEW_MAX_GROW, limit[i]))
+  })
+  return new Map(
+    tables.map((t, i) => [t.id, stuck[i] ? 1 : t.sectionId ? Math.min(bySection.get(t.sectionId) ?? limit[i], limit[i]) : limit[i]]),
+  )
+}
 
 /**
  * Where to put a section's name: always directly under one of its own tables.

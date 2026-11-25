@@ -1,6 +1,6 @@
 import type { DesignTable } from '../types'
 import { chairPositions, tableSize } from '../logic/geometry'
-import { DESIGN_CHAIR_RADIUS, TABLE_KINDS, designTableBox, shortName, tableCenterText, toTable } from '../logic/designTables'
+import { DESIGN_CHAIR_RADIUS, TABLE_KINDS, designTableBox, overviewSize, shortName, tableCenterText, toTable } from '../logic/designTables'
 import { colors } from '../theme'
 import ChairKindIcon from './ChairKindIcon'
 
@@ -39,6 +39,11 @@ interface DesignTableShapeProps {
   live?: LiveTableLook
   /** Names are drawn by TableNameLabels (placed so they don't overlap); only numbers go in the table. */
   hideNames?: boolean
+  /**
+   * Zoomed-out live floor: with chairs hidden, the table top fills the space they'd use, grown by this factor
+   * (see overviewGrowth), and its number is drawn bigger. Leave out to draw the real size (the editor).
+   */
+  overviewScale?: number
 }
 
 const PICK_COLOR = '#1F6F8B'
@@ -46,6 +51,8 @@ const PICK_COLOR = '#1F6F8B'
 const MIN_TOUCH_PX = 48
 /** Smallest readable text, in screen pixels. */
 const MIN_TEXT_PX = 11
+/** Smallest seat-count number on the zoomed-out live floor, in screen pixels. */
+const MIN_OVERVIEW_NUMBER_PX = 16
 /** Names may shrink a little further than numbers before being cut short, so whole surnames fit more often. */
 const MIN_NAME_PX = 7
 /** Average width of one uppercase-ish bold letter, as a share of the font size. */
@@ -76,9 +83,24 @@ function nameLines(name: string): string[] {
  * One designed table. Zoomed out it's just the table top with its seat count (or VIP name) in the middle;
  * zoomed in or selected, the individual chairs appear.
  */
-function DesignTableShape({ table, selected = false, picked = false, showChairs = false, showText = true, scale = 10, live, hideNames = false }: DesignTableShapeProps) {
+function DesignTableShape({
+  table,
+  selected = false,
+  picked = false,
+  showChairs = false,
+  showText = true,
+  scale = 10,
+  live,
+  hideNames = false,
+  overviewScale,
+}: DesignTableShapeProps) {
   const asTable = toTable(table)
-  const { width, height } = tableSize(asTable)
+  // Zoomed-out live floor: the bigger "overview" table top. Otherwise the real size.
+  const overview = overviewScale !== undefined && !showChairs
+  const real = tableSize(asTable)
+  const big = overview ? overviewSize(table) : real
+  const width = overview ? big.width * overviewScale : real.width
+  const height = overview ? big.height * overviewScale : real.height
   const kindLook = TABLE_KINDS[table.kind]
   const look = live ? { fill: live.fill, stroke: live.stroke, text: live.textColor } : kindLook
   const outline = picked ? PICK_COLOR : selected ? colors.selection : look.stroke
@@ -118,7 +140,9 @@ function DesignTableShape({ table, selected = false, picked = false, showChairs 
     fontSize = 1
   } else if (isNumber) {
     lines = [centerText]
-    fontSize = Math.max(Math.min(roomW, roomH) * 0.7, MIN_TEXT_PX / scale)
+    fontSize = overview
+      ? Math.max(Math.min(roomW, roomH) * 0.75, MIN_OVERVIEW_NUMBER_PX / scale)
+      : Math.max(Math.min(roomW, roomH) * 0.7, MIN_TEXT_PX / scale)
   } else {
     // Biggest size at which these lines fit inside the table.
     const fitFor = (ls: string[]) =>
@@ -143,8 +167,8 @@ function DesignTableShape({ table, selected = false, picked = false, showChairs 
   const badges = (['wheelchair', 'highchair'] as const).filter((k) => kinds.includes(k))
   const badgeR = 7 / scale // ~14px circle on screen
   const corner = (Math.max(width, height) / 2) * 0.75 // top-right of the table top
-  const hitW = Math.max(box.maxX - box.minX, minHit)
-  const hitH = Math.max(box.maxY - box.minY, minHit)
+  const hitW = Math.max(box.maxX - box.minX, minHit, width)
+  const hitH = Math.max(box.maxY - box.minY, minHit, height)
 
   return (
     <g transform={`translate(${table.x} ${table.y})`}>
@@ -182,7 +206,7 @@ function DesignTableShape({ table, selected = false, picked = false, showChairs 
           {table.shape === 'circle' ? (
             <circle r={width / 2} />
           ) : (
-            <rect x={-width / 2} y={-height / 2} width={width} height={height} rx={0.4} />
+            <rect x={-width / 2} y={-height / 2} width={width} height={height} rx={overview ? Math.min(width, height) * 0.12 : 0.4} />
           )}
         </g>
       </g>
@@ -226,6 +250,11 @@ function DesignTableShape({ table, selected = false, picked = false, showChairs 
               fontSize={fontSize}
               fontWeight={800}
               fill={look.text}
+              // Zoomed-out live floor: a thin white edge around the number keeps it readable on any color.
+              stroke={overview && isNumber ? colors.white : undefined}
+              strokeWidth={overview && isNumber ? fontSize * 0.12 : undefined}
+              strokeLinejoin="round"
+              paintOrder="stroke"
               style={{ pointerEvents: 'none', userSelect: 'none' }}
             >
               {line}

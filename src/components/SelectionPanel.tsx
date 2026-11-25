@@ -167,7 +167,8 @@ function SelectionPanel(props: SelectionPanelProps) {
           />
           <p className="panel__hint">
             Exactly this many seats across {groupNames.join(', ')}, odd numbers too. Tables keep their normal size in
-            order and chairs come off the last table ({groupNames[groupNames.length - 1]}).
+            order. Fewer seats: chairs come off the last table ({groupNames[groupNames.length - 1]}). More seats: that
+            last table grows to fit them.
           </p>
         </section>
       )}
